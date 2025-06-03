@@ -1,0 +1,10 @@
+#! /bin/sh
+#
+# Created by configure
+
+'./configure' \
+'--enable-sqlite' \
+'--with-redis' \
+'--disable-ssl' \
+'--disable-wap' \
+"$@"
