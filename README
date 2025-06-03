@@ -1,3 +1,11 @@
+This is Modified Kannel 1.4.5 Version to Compile on Modern Systems with Enabled Redis, WAP/RADIUS disabled, SSL disabled 
+Use:
+./configure --enable-sqlite --with-redis --disable-ssl --disable-wap
+make
+make install
+Tested on Archlinux, I use Arch BTW!
+Below is original Readme:
+
 README for Kannel: Open Source WAP and SMS Gateway
 
 
