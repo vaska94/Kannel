@@ -128,7 +128,7 @@ wapobjs = $(wapsrcs:.c=.o)
 #wmlscriptsrcs = $(wildcard wmlscript/*.c)
 #wmlscriptobjs = $(wmlscriptsrcs:.c=.o)
 
-testsrcs = $(filter-out test/fakewap.c test/wapproxy.c test/wml_tester.c test/test_ppg.c test/test_pap.c test/test_si.c test/test_sl.c test/test_ota.c test/test_headers.c test/test_mime.c, $(wildcard test/*.c))
+testsrcs = $(filter-out test/fakewap.c test/wapproxy.c test/wml_tester.c test/test_ppg.c test/test_pap.c test/test_si.c test/test_sl.c test/test_ota.c test/test_headers.c test/test_mime.c test/test_pdu.c test/test_radius_acct.c test/test_radius_pdu.c, $(wildcard test/*.c))
 testobjs = $(testsrcs:.c=.o)
 testprogs = $(testsrcs:.c=@EXE_EXT@)
 tests = $(testprogs) $(wildcard test/*.sh)
