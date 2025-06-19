@@ -3,7 +3,7 @@ Use:
 ./configure --enable-sqlite --with-redis --disable-ssl --disable-wap
 make
 make install
-Tested on Archlinux, I use Arch BTW!
+Tested on Archlinux and Rocky 10, I use Arch BTW!
 Below is original Readme:
 
 README for Kannel: Open Source WAP and SMS Gateway
