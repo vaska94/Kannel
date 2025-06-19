@@ -121,7 +121,7 @@ gwobjs = $(filter-out $(progobjs),$(gwsrcs:.c=.o))
 libsrcs = $(wildcard gwlib/*.c) $(LIBSRCS)
 libobjs = $(libsrcs:.c=.o) $(LIBOBJS)
 
-wapsrcs = $(wildcard wap/*.c) $(wildcard radius/*.c)
+wapsrcs = $(wildcard wap/*.c)
 wapobjs = $(wapsrcs:.c=.o)
 
 # Disabled WMLScript sources and objects
