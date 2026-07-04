@@ -384,7 +384,8 @@ static const char *smsc_cfg_allowed[] = {
     "source-addr-ton", "source-addr-npi", "dest-addr-ton", "dest-addr-npi",
     "transceiver-mode", "connect-allow-ip",
     "allowed-smsc-id", "denied-smsc-id", "preferred-smsc-id",
-    "reconnect-delay", "throughput", "window", "instances", "log-level",
+    "reconnect-delay", "enquire-link-interval", "max-pending-submits",
+    "throughput", "window", "instances", "log-level",
     NULL
 };
 
