@@ -636,6 +636,67 @@ static Octstr *httpd_delete_smsc_config(List *cgivars, int status_type)
     return octstr_format("SMSC `%S' deleted", id);
 }
 
+/*
+ * Send a test SMS through a connected smsbox. The admin panel is served by
+ * bearerbox, but sending is an smsbox function; a browser cannot reach the
+ * smsbox's (often internal) address cross-origin. So bearerbox proxies the
+ * request here: it validates the admin password, then forwards the sendsms
+ * call to the smsbox over the internal network and relays the response.
+ */
+static Octstr *httpd_send_sms(List *cgivars, int status_type)
+{
+    Octstr *reply, *pwd, *boxc, *base, *url, *v, *final_url, *body;
+    List *reply_headers = NULL;
+    int ret, i;
+    /* sendsms parameters we are willing to forward */
+    static const char *fwd[] = {
+        "from", "to", "text", "smsc", "dlr-mask", "dlr-url", "coding",
+        "mclass", "mwi", "validity", "deferred", "charset", "udh", "account",
+        "pid", "alt-dcs", "rpi", "binfo", "priority", NULL
+    };
+
+    if ((reply = httpd_check_authorization(cgivars, 0)) != NULL) return reply;
+
+    pwd = http_cgi_variable(cgivars, "password");
+    boxc = http_cgi_variable(cgivars, "smsbox");   /* optional target smsbox id */
+
+    base = boxc_sendsms_url(boxc);
+    if (base == NULL)
+        return octstr_create("No smsbox connected to send through");
+
+    /* forward as the 'admin' sendsms-user with the (already validated) password */
+    url = octstr_format("%S/cgi-bin/sendsms?username=admin", base);
+    octstr_destroy(base);
+    if (pwd != NULL) {
+        v = octstr_duplicate(pwd);
+        octstr_url_encode(v);
+        octstr_format_append(url, "&password=%S", v);
+        octstr_destroy(v);
+    }
+    for (i = 0; fwd[i] != NULL; i++) {
+        Octstr *raw = http_cgi_variable(cgivars, fwd[i]);
+        if (raw == NULL || octstr_len(raw) == 0)
+            continue;
+        v = octstr_duplicate(raw);
+        octstr_url_encode(v);
+        octstr_format_append(url, "&%s=%S", fwd[i], v);
+        octstr_destroy(v);
+    }
+
+    final_url = body = NULL;
+    ret = http_get_real(HTTP_METHOD_GET, url, NULL, &final_url, &reply_headers, &body);
+    octstr_destroy(url);
+    octstr_destroy(final_url);
+    if (reply_headers != NULL)
+        http_destroy_headers(reply_headers);
+
+    if (ret < 0 || body == NULL) {
+        octstr_destroy(body);
+        return octstr_create("Failed to reach the smsbox sendsms interface");
+    }
+    return body;   /* relay the smsbox response verbatim */
+}
+
 /* Known httpd commands and their functions */
 static struct httpd_command {
     const char *command;
@@ -658,6 +719,7 @@ static struct httpd_command {
     { "save-smsc-config", httpd_save_smsc_config },
     { "get-smsc-config", httpd_get_smsc_config },
     { "delete-smsc-config", httpd_delete_smsc_config },
+    { "send-sms", httpd_send_sms },
     { "reload-lists", httpd_reload_lists },
     { "remove-message", httpd_remove_message },
     { NULL , NULL } /* terminate list */

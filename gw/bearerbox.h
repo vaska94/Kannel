@@ -110,6 +110,9 @@ int smsbox_restart(Cfg *config);
 
 Octstr *boxc_status(int status_type);
 
+/* base sendsms URL of a connected smsbox (for the admin-panel send proxy) */
+Octstr *boxc_sendsms_url(Octstr *boxc_id);
+
 /* Clean up after box connections have died. */
 void boxc_cleanup(void);
 

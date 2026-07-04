@@ -1101,110 +1101,93 @@
             }
         }
 
-        async function testSmsAuth() {
+        // Build the query string for the same-origin /send-sms proxy on bearerbox.
+        function buildSendParams() {
             const pwd = getPassword();
-            const el = document.getElementById('sendAlert');
-            const smsboxIdx = document.getElementById('smsSmsbox').value;
+            let url = `/send-sms?password=${encodeURIComponent(pwd)}`;
+            // optional target smsbox (by boxc id); proxy picks first live one otherwise
+            const idx = document.getElementById('smsSmsbox').value;
+            const box = smsboxes[idx !== '' ? parseInt(idx) : 0];
+            if (box && box.id) url += `&smsbox=${encodeURIComponent(box.id)}`;
+            return url;
+        }
 
+        function sendResultIsOk(data) {
+            // smsbox returns e.g. "0: Accepted for delivery" / "3: Queued for later delivery"
+            return /accepted|queued/i.test(data) && !/authorization failed/i.test(data);
+        }
+
+        async function testSmsAuth() {
+            const el = document.getElementById('sendAlert');
             if (!smsboxes.length) {
                 el.innerHTML = '<div class="alert error">No smsbox connected</div>';
                 return;
             }
-
-            const box = smsboxes[smsboxIdx !== '' ? parseInt(smsboxIdx) : 0];
-            if (!box) {
-                el.innerHTML = '<div class="alert error">Please select an smsbox</div>';
-                return;
-            }
-
             try {
-                // Test auth by making request without required fields
-                const smsboxUrl = `${location.protocol}//${box.ip}:${box.http_port}`;
-                const res = await fetch(`${smsboxUrl}/cgi-bin/sendsms?username=admin&password=${encodeURIComponent(pwd)}`);
+                // no to/text -> smsbox rejects with a field error, which still proves
+                // the proxy reached the smsbox and the admin password was accepted
+                const res = await fetch(buildSendParams());
                 const data = await res.text();
-
-                if (data.includes('Authorization failed')) {
-                    el.innerHTML = '<div class="alert error">Auth failed - password not valid for smsbox. Add sendsms-user with admin-password.</div>';
+                if (/no smsbox connected|failed to reach/i.test(data)) {
+                    el.innerHTML = `<div class="alert error">${data}</div>`;
+                } else if (/authorization failed|denied/i.test(data)) {
+                    el.innerHTML = '<div class="alert error">Auth failed - admin sendsms-user not accepted by smsbox</div>';
                 } else {
-                    el.innerHTML = '<div class="alert success">Auth OK - password works with smsbox</div>';
+                    el.innerHTML = '<div class="alert success">smsbox reachable and auth OK</div>';
                 }
             } catch (e) {
-                el.innerHTML = `<div class="alert error">Connection error: ${e.message}</div>`;
+                el.innerHTML = `<div class="alert error">Error: ${e.message}</div>`;
             }
             setTimeout(() => el.innerHTML = '', 5000);
         }
 
         async function sendSms() {
-            const pwd = getPassword();
             const el = document.getElementById('sendAlert');
             const btn = document.getElementById('sendBtn');
 
-            const from = document.getElementById('smsFrom').value;
             const to = document.getElementById('smsTo').value;
             const text = document.getElementById('smsText').value;
-            const smsc = document.getElementById('smsSmsc').value;
-            const dlrMask = document.getElementById('smsDlrMask').value;
-            const smsboxIdx = document.getElementById('smsSmsbox').value;
-            // Advanced options
-            const coding = document.getElementById('smsCoding').value;
-            const mclass = document.getElementById('smsMclass').value;
-            const validity = document.getElementById('smsValidity').value;
-            const deferred = document.getElementById('smsDeferred').value;
-            const mwi = document.getElementById('smsMwi').value;
-            const charset = document.getElementById('smsCharset').value;
-            const udh = document.getElementById('smsUdh').value;
-
             if (!to || !text) {
                 el.innerHTML = '<div class="alert error">To and Message are required</div>';
                 return;
             }
-
-            // Get smsbox from selection
             if (!smsboxes.length) {
                 el.innerHTML = '<div class="alert error">No smsbox connected</div>';
                 return;
             }
 
-            const box = smsboxes[smsboxIdx !== '' ? parseInt(smsboxIdx) : 0];
-            if (!box) {
-                el.innerHTML = '<div class="alert error">Please select an smsbox</div>';
-                return;
+            const params = {
+                from: document.getElementById('smsFrom').value,
+                to: to,
+                text: text,
+                smsc: document.getElementById('smsSmsc').value,
+                'dlr-mask': document.getElementById('smsDlrMask').value,
+                coding: document.getElementById('smsCoding').value,
+                mclass: document.getElementById('smsMclass').value,
+                validity: document.getElementById('smsValidity').value,
+                deferred: document.getElementById('smsDeferred').value,
+                mwi: document.getElementById('smsMwi').value,
+                charset: document.getElementById('smsCharset').value,
+                udh: document.getElementById('smsUdh').value
+            };
+
+            let url = buildSendParams();
+            for (const [k, v] of Object.entries(params)) {
+                if (v) url += `&${k}=${encodeURIComponent(v)}`;
             }
 
             btn.disabled = true;
             btn.textContent = 'Sending...';
-
             try {
-                const smsboxUrl = `${location.protocol}//${box.ip}:${box.http_port}`;
-                let url = `${smsboxUrl}/cgi-bin/sendsms?username=admin&password=${encodeURIComponent(pwd)}` +
-                    `&to=${encodeURIComponent(to)}&text=${encodeURIComponent(text)}`;
-                if (from) url += `&from=${encodeURIComponent(from)}`;
-                if (smsc) url += `&smsc=${encodeURIComponent(smsc)}`;
-                if (dlrMask) url += `&dlr-mask=${dlrMask}`;
-                // Advanced options
-                if (coding) url += `&coding=${coding}`;
-                if (mclass) url += `&mclass=${mclass}`;
-                if (validity) url += `&validity=${validity}`;
-                if (deferred) url += `&deferred=${deferred}`;
-                if (mwi) url += `&mwi=${mwi}`;
-                if (charset) url += `&charset=${encodeURIComponent(charset)}`;
-                if (udh) url += `&udh=${encodeURIComponent(udh)}`;
-
                 const res = await fetch(url);
                 const data = await res.text();
-
-                if (res.ok && !data.includes('Authorization failed')) {
-                    el.innerHTML = `<div class="alert success">${data}</div>`;
-                } else {
-                    el.innerHTML = `<div class="alert error">${data}</div>`;
-                }
+                el.innerHTML = `<div class="alert ${sendResultIsOk(data) ? 'success' : 'error'}">${data}</div>`;
             } catch (e) {
                 el.innerHTML = `<div class="alert error">Error: ${e.message}</div>`;
             }
-
             btn.disabled = false;
             btn.textContent = 'Send SMS';
-            setTimeout(() => el.innerHTML = '', 5000);
+            setTimeout(() => el.innerHTML = '', 6000);
         }
 
         // Check for existing session
