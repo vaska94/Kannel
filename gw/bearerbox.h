@@ -162,6 +162,7 @@ int smsc2_remove_smsc(Octstr *id);   /* remove a specific smsc */
 
 /* runtime SMSC configuration persistence (admin panel) */
 Octstr *smsc2_config_dir(void);   /* configured smsc-config-dir, or NULL */
+int smsc2_smsc_exists(Octstr *id);  /* is an smsc-id in the running list? */
 int smsc2_write_smsc_config(Octstr *id, Octstr *block);  /* persist a group file */
 Octstr *smsc2_read_smsc_config(Octstr *id);  /* raw persisted group file, or NULL */
 int smsc2_delete_smsc_config(Octstr *id);  /* remove a persisted group file */

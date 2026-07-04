@@ -1185,6 +1185,21 @@ Octstr *smsc2_config_dir(void)
     return smsc_config_dir;
 }
 
+/* Whether an SMSC connection with this admin/smsc-id is currently in the
+ * running list (i.e. was successfully created). Used to detect a config that
+ * was written but failed to start. */
+int smsc2_smsc_exists(Octstr *id)
+{
+    long i;
+
+    if (!smsc_running)
+        return 0;
+    gw_rwlock_rdlock(&smsc_list_lock);
+    i = smsc2_find(id, 0);
+    gw_rwlock_unlock(&smsc_list_lock);
+    return (i != -1);
+}
+
 /*
  * Build the on-disk path for a given smsc-id. Caller must free.
  * The id is validated by the caller to contain only [A-Za-z0-9._-], so it is

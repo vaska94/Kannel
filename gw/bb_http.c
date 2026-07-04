@@ -507,12 +507,19 @@ static Octstr *httpd_save_smsc_config(List *cgivars, int status_type)
         octstr_destroy(q);
     }
 
-    if (bb_save_smsc_config(id, block) == -1) {
+    switch (bb_save_smsc_config(id, block)) {
+    case -2:
+        octstr_destroy(block);
+        return octstr_format("SMSC `%S' did not start and was rolled back. "
+                             "Check required fields (SMPP needs host, port, "
+                             "username, password and system-type).", id);
+    case -1:
         octstr_destroy(block);
         return octstr_format("Failed to save SMSC `%S' (check the log)", id);
+    default:
+        octstr_destroy(block);
+        return octstr_format("SMSC `%S' saved and activated", id);
     }
-    octstr_destroy(block);
-    return octstr_format("SMSC `%S' saved and activated", id);
 }
 
 /* append s to out, escaped as a JSON string body (no surrounding quotes) */

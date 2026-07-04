@@ -915,14 +915,44 @@ Octstr *bb_smsc_config_dir(void)
  */
 int bb_save_smsc_config(Octstr *id, Octstr *block)
 {
-    if (smsc2_write_smsc_config(id, block) == -1)
-        return -1;
-    if (bb_graceful_restart() == -1) {
-        error(0, "SMSC config: connection `%s' saved but reload failed; "
-                 "it will be applied on next restart.", octstr_get_cstr(id));
+    Octstr *backup;
+
+    /* remember the current config so we can roll back if the new one fails */
+    backup = smsc2_read_smsc_config(id);   /* NULL if this is a new SMSC */
+
+    if (smsc2_write_smsc_config(id, block) == -1) {
+        octstr_destroy(backup);
         return -1;
     }
-    return 0;
+    if (bb_graceful_restart() == -1) {
+        error(0, "SMSC config: connection `%s' saved but reload failed.",
+              octstr_get_cstr(id));
+        octstr_destroy(backup);
+        return -1;
+    }
+
+    /*
+     * Verify the SMSC actually started. A config that is syntactically valid
+     * but missing required fields (e.g. an SMPP group without system-type) is
+     * accepted by the parser but fails to create the connection, which would
+     * silently drop a previously-working SMSC. In that case roll back to the
+     * old config (or remove the new file) and reload again.
+     */
+    if (smsc2_smsc_exists(id)) {
+        octstr_destroy(backup);
+        return 0;
+    }
+
+    warning(0, "SMSC config: connection `%s' did not start; rolling back.",
+            octstr_get_cstr(id));
+    if (backup != NULL) {
+        smsc2_write_smsc_config(id, backup);
+        octstr_destroy(backup);
+    } else {
+        smsc2_delete_smsc_config(id);
+    }
+    bb_graceful_restart();
+    return -2;   /* written but failed to start; rolled back */
 }
 
 /*
