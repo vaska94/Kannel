@@ -472,6 +472,18 @@ static Octstr *httpd_save_smsc_config(List *cgivars, int status_type)
     if (!smsc_cfg_valid_type(type))
         return octstr_create("Invalid smsc type (allowed: lowercase letters, digits, '_', '-')");
 
+    /*
+     * A network SMSC without a host silently fails to start; because a save
+     * triggers a graceful restart, that would drop the previously-working
+     * connection and leave only the broken file on disk. Reject it so an
+     * incomplete edit can't destroy a working SMSC.
+     */
+    val = http_cgi_variable(cgivars, "host");
+    if ((val == NULL || octstr_len(val) == 0) &&
+        octstr_str_compare(type, "fake") != 0 &&
+        octstr_str_compare(type, "loopback") != 0)
+        return octstr_format("host is required for smsc type `%S'", type);
+
     block = octstr_create("# SMSC connection managed by the Kamex admin panel\n");
     octstr_append_cstr(block, "group = smsc\n");
     q = smsc_cfg_quote(type);
@@ -501,6 +513,96 @@ static Octstr *httpd_save_smsc_config(List *cgivars, int status_type)
     }
     octstr_destroy(block);
     return octstr_format("SMSC `%S' saved and activated", id);
+}
+
+/* append s to out, escaped as a JSON string body (no surrounding quotes) */
+static void smsc_cfg_json_append(Octstr *out, Octstr *s)
+{
+    long i, len = octstr_len(s);
+
+    for (i = 0; i < len; i++) {
+        int c = octstr_get_char(s, i);
+        switch (c) {
+            case '"':  octstr_append_cstr(out, "\\\""); break;
+            case '\\': octstr_append_cstr(out, "\\\\"); break;
+            case '\n': octstr_append_cstr(out, "\\n"); break;
+            case '\r': octstr_append_cstr(out, "\\r"); break;
+            case '\t': octstr_append_cstr(out, "\\t"); break;
+            default:   octstr_append_char(out, c); break;
+        }
+    }
+}
+
+/*
+ * Return the persisted directives of an SMSC as a JSON object so the admin
+ * panel can populate the edit form. Requires the admin password (the reply
+ * includes the SMSC password). Request with a .json suffix for a JSON reply.
+ */
+static Octstr *httpd_get_smsc_config(List *cgivars, int status_type)
+{
+    Octstr *reply, *id, *raw, *json, *line;
+    List *lines;
+    int first = 1;
+
+    if ((reply = httpd_check_authorization(cgivars, 0)) != NULL) return reply;
+
+    if (bb_smsc_config_dir() == NULL)
+        return octstr_create("Runtime SMSC configuration is disabled");
+
+    id = http_cgi_variable(cgivars, "smsc");
+    if (id == NULL)
+        id = http_cgi_variable(cgivars, "smsc-id");
+    if (id == NULL || octstr_len(id) == 0)
+        return octstr_create("SMSC id not given");
+    if (!smsc_cfg_valid_id(id))
+        return octstr_create("Invalid smsc-id");
+
+    raw = bb_read_smsc_config(id);
+    if (raw == NULL)
+        return octstr_create("{}");   /* unknown id -> empty object */
+
+    json = octstr_create("{");
+    lines = octstr_split(raw, octstr_imm("\n"));
+    while ((line = gwlist_extract_first(lines)) != NULL) {
+        long eq;
+        Octstr *key, *val;
+
+        octstr_strip_blanks(line);
+        if (octstr_len(line) == 0 || octstr_get_char(line, 0) == '#') {
+            octstr_destroy(line);
+            continue;
+        }
+        eq = octstr_search_char(line, '=', 0);
+        if (eq < 0) { octstr_destroy(line); continue; }
+        key = octstr_copy(line, 0, eq);
+        val = octstr_copy(line, eq + 1, octstr_len(line) - eq - 1);
+        octstr_strip_blanks(key);
+        octstr_strip_blanks(val);
+        if (octstr_str_compare(key, "group") == 0) {
+            octstr_destroy(key); octstr_destroy(val); octstr_destroy(line);
+            continue;
+        }
+        /* reverse of smsc_cfg_quote(): drop surrounding quotes, unescape */
+        if (octstr_len(val) >= 2 && octstr_get_char(val, 0) == '"' &&
+            octstr_get_char(val, octstr_len(val) - 1) == '"') {
+            octstr_delete(val, octstr_len(val) - 1, 1);
+            octstr_delete(val, 0, 1);
+            octstr_replace(val, octstr_imm("\\\""), octstr_imm("\""));
+            octstr_replace(val, octstr_imm("\\\\"), octstr_imm("\\"));
+        }
+        if (!first) octstr_append_char(json, ',');
+        first = 0;
+        octstr_append_char(json, '"');
+        smsc_cfg_json_append(json, key);
+        octstr_append_cstr(json, "\":\"");
+        smsc_cfg_json_append(json, val);
+        octstr_append_char(json, '"');
+        octstr_destroy(key); octstr_destroy(val); octstr_destroy(line);
+    }
+    gwlist_destroy(lines, octstr_destroy_item);
+    octstr_append_char(json, '}');
+    octstr_destroy(raw);
+    return json;
 }
 
 static Octstr *httpd_delete_smsc_config(List *cgivars, int status_type)
@@ -547,6 +649,7 @@ static struct httpd_command {
     { "add-smsc", httpd_add_smsc },
     { "remove-smsc", httpd_remove_smsc },
     { "save-smsc-config", httpd_save_smsc_config },
+    { "get-smsc-config", httpd_get_smsc_config },
     { "delete-smsc-config", httpd_delete_smsc_config },
     { "reload-lists", httpd_reload_lists },
     { "remove-message", httpd_remove_message },

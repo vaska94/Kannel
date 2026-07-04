@@ -868,9 +868,50 @@
             }).join('');
         }
 
-        function loadSmscIntoForm(id) {
-            document.getElementById('scId').value = id;
+        // directive name -> form input id (shared by load + save)
+        const smscFieldMap = {
+            'smsc-id': 'scId',
+            'smsc': 'scType',
+            'host': 'scHost',
+            'port': 'scPort',
+            'smsc-username': 'scUser',
+            'smsc-password': 'scPass',
+            'system-type': 'scSystemType',
+            'transceiver-mode': 'scTransceiver',
+            'receive-port': 'scReceivePort',
+            'interface-version': 'scInterfaceVersion',
+            'source-addr-ton': 'scSrcTon',
+            'source-addr-npi': 'scSrcNpi',
+            'dest-addr-ton': 'scDstTon',
+            'dest-addr-npi': 'scDstNpi',
+            'reconnect-delay': 'scReconnect',
+            'log-level': 'scLogLevel',
+            'allowed-smsc-id': 'scAllowedIds',
+            'connect-allow-ip': 'scConnectAllowIp'
+        };
+
+        async function loadSmscIntoForm(id) {
             document.querySelector('.tab[data-tab="smscs"]').click();
+            const pwd = getPassword();
+            // clear all fields so stale values don't leak between edits
+            Object.values(smscFieldMap).forEach(elId => {
+                const el = document.getElementById(elId);
+                if (el) el.value = '';
+            });
+            document.getElementById('scId').value = id;
+            try {
+                const res = await fetch(`/get-smsc-config.json?password=${encodeURIComponent(pwd)}&smsc=${encodeURIComponent(id)}`);
+                const cfg = await res.json();
+                for (const [key, elId] of Object.entries(smscFieldMap)) {
+                    if (cfg[key] !== undefined) {
+                        const el = document.getElementById(elId);
+                        if (el) el.value = cfg[key];
+                    }
+                }
+            } catch (e) {
+                const al = document.getElementById('smscAlert');
+                if (al) al.innerHTML = `<div class="alert error">Could not load SMSC config: ${e.message}. Re-enter all fields before saving.</div>`;
+            }
             document.getElementById('scId').scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
 
@@ -923,27 +964,8 @@
             const el = document.getElementById('smscAlert');
             const btn = document.getElementById('scSaveBtn');
 
-            // map of directive name -> input element id
-            const fields = {
-                'smsc-id': 'scId',
-                'smsc': 'scType',
-                'host': 'scHost',
-                'port': 'scPort',
-                'smsc-username': 'scUser',
-                'smsc-password': 'scPass',
-                'system-type': 'scSystemType',
-                'transceiver-mode': 'scTransceiver',
-                'receive-port': 'scReceivePort',
-                'interface-version': 'scInterfaceVersion',
-                'source-addr-ton': 'scSrcTon',
-                'source-addr-npi': 'scSrcNpi',
-                'dest-addr-ton': 'scDstTon',
-                'dest-addr-npi': 'scDstNpi',
-                'reconnect-delay': 'scReconnect',
-                'log-level': 'scLogLevel',
-                'allowed-smsc-id': 'scAllowedIds',
-                'connect-allow-ip': 'scConnectAllowIp'
-            };
+            // directive name -> input element id (shared with loadSmscIntoForm)
+            const fields = smscFieldMap;
 
             const id = document.getElementById('scId').value.trim();
             if (!id) {

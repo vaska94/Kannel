@@ -926,6 +926,14 @@ int bb_save_smsc_config(Octstr *id, Octstr *block)
 }
 
 /*
+ * Return the raw persisted config file for an SMSC connection, or NULL.
+ */
+Octstr *bb_read_smsc_config(Octstr *id)
+{
+    return smsc2_read_smsc_config(id);
+}
+
+/*
  * Remove a persisted SMSC connection and reload so it is shut down.
  */
 int bb_delete_smsc_config(Octstr *id)

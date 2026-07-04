@@ -1252,6 +1252,20 @@ int smsc2_write_smsc_config(Octstr *id, Octstr *block)
     return 0;
 }
 
+Octstr *smsc2_read_smsc_config(Octstr *id)
+{
+    Octstr *path, *contents;
+
+    if (smsc_config_dir == NULL)
+        return NULL;
+    if ((path = smsc_config_path(id)) == NULL)
+        return NULL;
+
+    contents = octstr_read_file(octstr_get_cstr(path));
+    octstr_destroy(path);
+    return contents;   /* NULL if the file does not exist */
+}
+
 int smsc2_delete_smsc_config(Octstr *id)
 {
     Octstr *path;
