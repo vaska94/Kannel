@@ -819,10 +819,10 @@
                 return;
             }
             el.innerHTML = smscs.map(s => {
-                const statusClass = s.status === 'online' ? 'online' :
+                const statusClass = s.status.includes('online') ? 'online' :
                                    s.status.includes('connecting') ? 'connecting' : 'offline';
                 // Show Stop for online OR connecting states (SMSC is running)
-                const isRunning = s.status === 'online' || s.status.includes('connecting');
+                const isRunning = s.status.includes('online') || s.status.includes('connecting');
                 return `
                     <div class="smsc-item">
                         <div class="smsc-info">
@@ -853,7 +853,7 @@
                 return;
             }
             el.innerHTML = smscs.map(s => {
-                const statusClass = s.status === 'online' ? 'online' :
+                const statusClass = s.status.includes('online') ? 'online' :
                                    s.status.includes('connecting') ? 'connecting' : 'offline';
                 const id = (s.id || s.name || '').replace(/'/g, "\\'");
                 return `
