@@ -134,6 +134,7 @@ SINGLE_GROUP(core,
     OCTSTR(ssl-server-cipher-list)
     OCTSTR(dlr-storage)
     OCTSTR(dlr-spool)
+    OCTSTR(smsc-config-dir)         /* directory for admin-panel managed SMSC connections */
     OCTSTR(maximum-queue-length)    /* deprecated, supported until next major stable release */
     OCTSTR(sms-incoming-queue-limit)
     OCTSTR(sms-outgoing-queue-limit)

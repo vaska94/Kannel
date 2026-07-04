@@ -160,6 +160,11 @@ int smsc2_restart_smsc(Octstr *id);  /* re-start a specific smsc */
 int smsc2_add_smsc(Octstr *id);   /* add a new smsc */
 int smsc2_remove_smsc(Octstr *id);   /* remove a specific smsc */
 
+/* runtime SMSC configuration persistence (admin panel) */
+Octstr *smsc2_config_dir(void);   /* configured smsc-config-dir, or NULL */
+int smsc2_write_smsc_config(Octstr *id, Octstr *block);  /* persist a group file */
+int smsc2_delete_smsc_config(Octstr *id);  /* remove a persisted group file */
+
 int smsc2_reload_lists(void); /* reload blacklists */
 
 
@@ -203,6 +208,9 @@ int bb_stop_smsc(Octstr *id);
 int bb_add_smsc(Octstr *id);
 int bb_remove_smsc(Octstr *id);
 int bb_restart_smsc(Octstr *id);
+Octstr *bb_smsc_config_dir(void);
+int bb_save_smsc_config(Octstr *id, Octstr *block);
+int bb_delete_smsc_config(Octstr *id);
 int bb_remove_message(Octstr *id);
 int bb_reload_lists(void);
 int bb_reload_smsc_groups(void);

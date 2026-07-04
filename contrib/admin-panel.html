@@ -250,6 +250,7 @@
 
         <div class="tabs">
             <button class="tab active" data-tab="dashboard">Dashboard</button>
+            <button class="tab" data-tab="smscs">SMSCs</button>
             <button class="tab" data-tab="queue">Queue</button>
             <button class="tab" data-tab="send">Send SMS</button>
             <button class="tab" data-tab="controls">Controls</button>
@@ -474,6 +475,133 @@
                         </div>
                     </div>
                     <button class="btn btn-secondary" onclick="setLogLevel()">Apply</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="smscs" class="tab-content">
+            <div class="grid">
+                <div class="card">
+                    <h2>Add / Update SMSC Connection</h2>
+                    <div id="smscAlert"></div>
+                    <p style="color: #71767b; font-size: 13px; margin-bottom: 16px;">
+                        Saves the connection to disk and reloads the gateway (graceful restart).
+                        Using an existing SMSC ID updates it in place. Applied without dropping other connections.
+                    </p>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>SMSC ID *</label>
+                            <input type="text" id="scId" placeholder="my-smpp">
+                        </div>
+                        <div class="form-group">
+                            <label>Type *</label>
+                            <select id="scType">
+                                <option value="smpp">smpp</option>
+                                <option value="at">at</option>
+                                <option value="http">http</option>
+                                <option value="cimd2">cimd2</option>
+                                <option value="emi">emi</option>
+                                <option value="loopback">loopback</option>
+                                <option value="fake">fake</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Host</label>
+                            <input type="text" id="scHost" placeholder="smsc.example.com">
+                        </div>
+                        <div class="form-group">
+                            <label>Port</label>
+                            <input type="number" id="scPort" placeholder="2775">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Username</label>
+                            <input type="text" id="scUser" placeholder="system-id">
+                        </div>
+                        <div class="form-group">
+                            <label>Password</label>
+                            <input type="password" id="scPass" placeholder="secret">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>System Type</label>
+                            <input type="text" id="scSystemType" placeholder="e.g. VMA">
+                        </div>
+                        <div class="form-group">
+                            <label>Transceiver Mode</label>
+                            <select id="scTransceiver">
+                                <option value="">Default</option>
+                                <option value="1">Yes (TRX)</option>
+                                <option value="0">No (TX/RX)</option>
+                            </select>
+                        </div>
+                    </div>
+                    <details style="margin-bottom: 16px;">
+                        <summary style="cursor: pointer; color: #71767b; font-size: 13px; margin-bottom: 12px;">Advanced Options</summary>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Receive Port</label>
+                                <input type="number" id="scReceivePort" placeholder="optional">
+                            </div>
+                            <div class="form-group">
+                                <label>Interface Version</label>
+                                <input type="text" id="scInterfaceVersion" placeholder="34">
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Source Addr TON</label>
+                                <input type="number" id="scSrcTon" placeholder="optional">
+                            </div>
+                            <div class="form-group">
+                                <label>Source Addr NPI</label>
+                                <input type="number" id="scSrcNpi" placeholder="optional">
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Dest Addr TON</label>
+                                <input type="number" id="scDstTon" placeholder="optional">
+                            </div>
+                            <div class="form-group">
+                                <label>Dest Addr NPI</label>
+                                <input type="number" id="scDstNpi" placeholder="optional">
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Reconnect Delay (s)</label>
+                                <input type="number" id="scReconnect" placeholder="optional">
+                            </div>
+                            <div class="form-group">
+                                <label>Log Level</label>
+                                <input type="number" id="scLogLevel" min="0" max="4" placeholder="optional">
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>Allowed SMSC IDs (for routing, semicolon-separated)</label>
+                            <input type="text" id="scAllowedIds" placeholder="e.g. operatorA;operatorB">
+                        </div>
+                        <div class="form-group">
+                            <label>Connect Allow IP</label>
+                            <input type="text" id="scConnectAllowIp" placeholder="e.g. 127.0.0.1;10.0.0.0/8">
+                        </div>
+                    </details>
+                    <button class="btn btn-primary" onclick="saveSmscConfig()" id="scSaveBtn">Save &amp; Activate</button>
+                </div>
+                <div class="card">
+                    <h2>Configured SMSCs</h2>
+                    <p style="color: #71767b; font-size: 13px; margin-bottom: 16px;">
+                        Delete removes the connection permanently (from disk) and reloads.
+                        Click an SMSC to load its ID into the form.
+                    </p>
+                    <div id="smscManageList" class="smsc-list">
+                        <div class="empty">Loading...</div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -713,6 +841,37 @@
                     </div>
                 `;
             }).join('');
+
+            updateSmscManageList(smscs);
+        }
+
+        function updateSmscManageList(smscs) {
+            const el = document.getElementById('smscManageList');
+            if (!el) return;
+            if (!smscs.length) {
+                el.innerHTML = '<div class="empty">No SMSCs configured</div>';
+                return;
+            }
+            el.innerHTML = smscs.map(s => {
+                const statusClass = s.status === 'online' ? 'online' :
+                                   s.status.includes('connecting') ? 'connecting' : 'offline';
+                const id = (s.id || s.name || '').replace(/'/g, "\\'");
+                return `
+                    <div class="smsc-item">
+                        <div class="smsc-info" style="cursor:pointer" onclick="loadSmscIntoForm('${id}')">
+                            <span class="smsc-id">${s.id || s.name}</span>
+                            <span class="smsc-status ${statusClass}">${s.status}</span>
+                        </div>
+                        <button class="btn btn-stop" onclick="deleteSmscConfig('${id}')">Delete</button>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function loadSmscIntoForm(id) {
+            document.getElementById('scId').value = id;
+            document.querySelector('.tab[data-tab="smscs"]').click();
+            document.getElementById('scId').scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
 
         function updateBoxesList(boxes) {
@@ -757,6 +916,77 @@
             } catch (e) {
                 alert('Error: ' + e.message);
             }
+        }
+
+        async function saveSmscConfig() {
+            const pwd = getPassword();
+            const el = document.getElementById('smscAlert');
+            const btn = document.getElementById('scSaveBtn');
+
+            // map of directive name -> input element id
+            const fields = {
+                'smsc-id': 'scId',
+                'smsc': 'scType',
+                'host': 'scHost',
+                'port': 'scPort',
+                'smsc-username': 'scUser',
+                'smsc-password': 'scPass',
+                'system-type': 'scSystemType',
+                'transceiver-mode': 'scTransceiver',
+                'receive-port': 'scReceivePort',
+                'interface-version': 'scInterfaceVersion',
+                'source-addr-ton': 'scSrcTon',
+                'source-addr-npi': 'scSrcNpi',
+                'dest-addr-ton': 'scDstTon',
+                'dest-addr-npi': 'scDstNpi',
+                'reconnect-delay': 'scReconnect',
+                'log-level': 'scLogLevel',
+                'allowed-smsc-id': 'scAllowedIds',
+                'connect-allow-ip': 'scConnectAllowIp'
+            };
+
+            const id = document.getElementById('scId').value.trim();
+            if (!id) {
+                el.innerHTML = '<div class="alert error">SMSC ID is required</div>';
+                return;
+            }
+
+            let params = '';
+            for (const [key, elId] of Object.entries(fields)) {
+                const v = document.getElementById(elId).value.trim();
+                if (v) params += `&${key}=${encodeURIComponent(v)}`;
+            }
+
+            btn.disabled = true;
+            btn.textContent = 'Saving...';
+            try {
+                const res = await fetch(`/save-smsc-config?password=${encodeURIComponent(pwd)}${params}`);
+                const text = await res.text();
+                const ok = text.includes('saved and activated');
+                el.innerHTML = `<div class="alert ${ok ? 'success' : 'error'}">${text}</div>`;
+                if (ok) fetchStatus();
+            } catch (e) {
+                el.innerHTML = `<div class="alert error">Error: ${e.message}</div>`;
+            }
+            btn.disabled = false;
+            btn.textContent = 'Save & Activate';
+            setTimeout(() => el.innerHTML = '', 6000);
+        }
+
+        async function deleteSmscConfig(id) {
+            if (!confirm(`Permanently delete SMSC "${id}"?`)) return;
+            const pwd = getPassword();
+            const el = document.getElementById('smscAlert');
+            try {
+                const res = await fetch(`/delete-smsc-config?password=${encodeURIComponent(pwd)}&smsc=${encodeURIComponent(id)}`);
+                const text = await res.text();
+                const ok = text.includes('deleted');
+                el.innerHTML = `<div class="alert ${ok ? 'success' : 'error'}">${text}</div>`;
+                fetchStatus();
+            } catch (e) {
+                el.innerHTML = `<div class="alert error">Error: ${e.message}</div>`;
+            }
+            setTimeout(() => el.innerHTML = '', 6000);
         }
 
         async function gwCommand(cmd) {

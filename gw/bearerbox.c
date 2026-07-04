@@ -902,6 +902,44 @@ int bb_remove_smsc(Octstr *id)
     return smsc2_remove_smsc(id);
 }
 
+Octstr *bb_smsc_config_dir(void)
+{
+    return smsc2_config_dir();
+}
+
+/*
+ * Persist a new/updated SMSC connection to the config directory and reload.
+ * The graceful restart re-reads the configuration (which includes the config
+ * directory) and brings the connection online, applying any routing changes
+ * to already-running SMSCs without disconnecting them.
+ */
+int bb_save_smsc_config(Octstr *id, Octstr *block)
+{
+    if (smsc2_write_smsc_config(id, block) == -1)
+        return -1;
+    if (bb_graceful_restart() == -1) {
+        error(0, "SMSC config: connection `%s' saved but reload failed; "
+                 "it will be applied on next restart.", octstr_get_cstr(id));
+        return -1;
+    }
+    return 0;
+}
+
+/*
+ * Remove a persisted SMSC connection and reload so it is shut down.
+ */
+int bb_delete_smsc_config(Octstr *id)
+{
+    if (smsc2_delete_smsc_config(id) == -1)
+        return -1;
+    if (bb_graceful_restart() == -1) {
+        error(0, "SMSC config: connection `%s' file removed but reload failed; "
+                 "it will be gone on next restart.", octstr_get_cstr(id));
+        return -1;
+    }
+    return 0;
+}
+
 int bb_restart(void)
 {
     restart = 1;
