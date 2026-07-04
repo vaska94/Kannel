@@ -189,6 +189,11 @@ void httpadmin_stop(void);
 /* passes the access-log-format string from config to the module */
 void bb_alog_init(const Octstr *format);
 
+/* optional PostgreSQL message logging for the admin panel report pages */
+void msglog_init(Cfg *cfg);
+void msglog_shutdown(void);
+Octstr *msglog_query_json(Octstr *type, long limit);
+
 /* cleanup for internal things */
 void bb_alog_shutdown(void);
 

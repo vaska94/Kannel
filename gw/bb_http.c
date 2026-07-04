@@ -698,6 +698,28 @@ static Octstr *httpd_send_sms(List *cgivars, int status_type)
     return body;   /* relay the smsbox response verbatim */
 }
 
+/*
+ * Report data for the admin panel Inbox/Outbox/DLR pages. Read-only, so the
+ * status password is sufficient. Returns a JSON array of recent message_log
+ * rows of the requested type. Request as .json for a JSON content type.
+ */
+static Octstr *httpd_messages(List *cgivars, int status_type)
+{
+    Octstr *reply, *type, *limit_s;
+    long limit = 100;
+
+    if ((reply = httpd_check_authorization(cgivars, 1)) != NULL) return reply;
+
+    type = http_cgi_variable(cgivars, "type");
+    if (type == NULL || octstr_len(type) == 0)
+        type = octstr_imm("MO");
+    limit_s = http_cgi_variable(cgivars, "limit");
+    if (limit_s != NULL)
+        limit = atol(octstr_get_cstr(limit_s));
+
+    return msglog_query_json(type, limit);
+}
+
 /* Known httpd commands and their functions */
 static struct httpd_command {
     const char *command;
@@ -721,6 +743,7 @@ static struct httpd_command {
     { "get-smsc-config", httpd_get_smsc_config },
     { "delete-smsc-config", httpd_delete_smsc_config },
     { "send-sms", httpd_send_sms },
+    { "messages", httpd_messages },
     { "reload-lists", httpd_reload_lists },
     { "remove-message", httpd_remove_message },
     { NULL , NULL } /* terminate list */

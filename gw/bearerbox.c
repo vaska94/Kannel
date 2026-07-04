@@ -677,7 +677,8 @@ int main(int argc, char **argv)
     }
 
     dlr_init(cfg);
-    
+    msglog_init(cfg);
+
     report_versions("bearerbox");
 
     flow_threads = gwlist_create();
@@ -772,6 +773,7 @@ int main(int argc, char **argv)
 
     alog_close();		/* if we have any */
     bb_alog_shutdown();
+    msglog_shutdown();
     cfg_destroy(cfg);
     octstr_destroy(cfg_filename);
     dlr_shutdown();

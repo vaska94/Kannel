@@ -251,6 +251,9 @@
         <div class="tabs">
             <button class="tab active" data-tab="dashboard">Dashboard</button>
             <button class="tab" data-tab="smscs">SMSCs</button>
+            <button class="tab" data-tab="inbox">Inbox</button>
+            <button class="tab" data-tab="outbox">Outbox</button>
+            <button class="tab" data-tab="dlr">DLR</button>
             <button class="tab" data-tab="queue">Queue</button>
             <button class="tab" data-tab="send">Send SMS</button>
             <button class="tab" data-tab="controls">Controls</button>
@@ -336,6 +339,36 @@
                         <div class="empty">Loading...</div>
                     </div>
                 </div>
+            </div>
+        </div>
+
+        <div id="inbox" class="tab-content">
+            <div class="card">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+                    <h2 style="margin:0">Inbox (Received / MO)</h2>
+                    <button class="btn btn-secondary" onclick="loadMessages('MO')">Refresh</button>
+                </div>
+                <div id="inboxList"><div class="empty">Loading...</div></div>
+            </div>
+        </div>
+
+        <div id="outbox" class="tab-content">
+            <div class="card">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+                    <h2 style="margin:0">Outbox (Sent / MT)</h2>
+                    <button class="btn btn-secondary" onclick="loadMessages('MT')">Refresh</button>
+                </div>
+                <div id="outboxList"><div class="empty">Loading...</div></div>
+            </div>
+        </div>
+
+        <div id="dlr" class="tab-content">
+            <div class="card">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+                    <h2 style="margin:0">DLR Reports</h2>
+                    <button class="btn btn-secondary" onclick="loadMessages('DLR')">Refresh</button>
+                </div>
+                <div id="dlrList"><div class="empty">Loading...</div></div>
             </div>
         </div>
 
@@ -752,6 +785,9 @@
                 document.getElementById(tab.dataset.tab).classList.add('active');
                 // Auto-load queue when switching to queue tab
                 if (tab.dataset.tab === 'queue') fetchQueue();
+                if (tab.dataset.tab === 'inbox') loadMessages('MO');
+                if (tab.dataset.tab === 'outbox') loadMessages('MT');
+                if (tab.dataset.tab === 'dlr') loadMessages('DLR');
             });
         });
 
@@ -1046,6 +1082,50 @@
                 alert(text);
             } catch (e) {
                 alert('Error: ' + e.message);
+            }
+        }
+
+        function htmlEsc(s) {
+            if (s === undefined || s === null) return '';
+            return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+
+        function dlrStatusLabel(mask) {
+            const map = { '1': 'Delivered', '2': 'Failed', '4': 'Buffered', '8': 'Submitted', '16': 'Rejected' };
+            return map[String(mask)] || (mask || '-');
+        }
+
+        async function loadMessages(type) {
+            const pwd = getPassword();
+            const containerId = type === 'MO' ? 'inboxList' : (type === 'MT' ? 'outboxList' : 'dlrList');
+            const el = document.getElementById(containerId);
+            el.innerHTML = '<div class="empty">Loading...</div>';
+            try {
+                const res = await fetch(`/messages.json?password=${encodeURIComponent(pwd)}&type=${type}&limit=200`);
+                const rows = await res.json();
+                if (!rows.length) {
+                    el.innerHTML = '<div class="empty">No messages yet</div>';
+                    return;
+                }
+                let cols, renderRow;
+                if (type === 'DLR') {
+                    cols = ['Time', 'SMSC', 'To', 'Foreign ID', 'Status', 'Message'];
+                    renderRow = r => `<td>${r.time}</td><td>${htmlEsc(r.smsc) || '-'}</td>` +
+                        `<td>${htmlEsc(r.receiver) || '-'}</td>` +
+                        `<td class="msg-id">${htmlEsc(r.foreign_id) || '-'}</td>` +
+                        `<td>${dlrStatusLabel(r.dlr_mask)}</td>` +
+                        `<td class="msg-text" title="${htmlEsc(r.msg)}">${htmlEsc(r.msg)}</td>`;
+                } else {
+                    cols = ['Time', 'From', 'To', 'SMSC', 'Message'];
+                    renderRow = r => `<td>${r.time}</td><td>${htmlEsc(r.sender) || '-'}</td>` +
+                        `<td>${htmlEsc(r.receiver) || '-'}</td><td>${htmlEsc(r.smsc) || '-'}</td>` +
+                        `<td class="msg-text" title="${htmlEsc(r.msg)}">${htmlEsc(r.msg)}</td>`;
+                }
+                el.innerHTML = `<table class="queue-table"><thead><tr>${cols.map(c => `<th>${c}</th>`).join('')}</tr></thead>` +
+                    `<tbody>${rows.map(r => `<tr>${renderRow(r)}</tr>`).join('')}</tbody></table>`;
+            } catch (e) {
+                el.innerHTML = `<div class="empty">Error: ${e.message}</div>`;
             }
         }
 

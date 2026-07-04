@@ -62,12 +62,277 @@
  */
 
 #include "gwlib/gwlib.h"
+#include "gwlib/dbpool.h"
 #include "msg.h"
 #include "sms.h"
 #include "bearerbox.h"
 #include "smscconn.h"
 
 static Octstr *custom_log_format = NULL;
+
+/*
+ * Optional persistent message logging to PostgreSQL, feeding the admin panel's
+ * Inbox/Outbox/DLR report pages. Enabled by the core directive
+ * 'msglog-pgsql-id', which names a 'pgsql-connection' group. Every SMS/DLR
+ * event that passes through bb_alog_sms() is also stored in the message_log
+ * table. Disabled (zero overhead) when not configured or built without PgSQL.
+ */
+#ifdef HAVE_PGSQL
+static DBPool *msglog_pool = NULL;
+
+/* classify an event for the report pages */
+static const char *msglog_type(Msg *msg)
+{
+    switch (msg->sms.sms_type) {
+        case report_mo:
+        case report_mt:
+            return "DLR";
+        case mo:
+            return "MO";
+        default:
+            return "MT";
+    }
+}
+
+/* escape a value for a single-quoted PostgreSQL string literal */
+static Octstr *msglog_esc(const Octstr *v)
+{
+    Octstr *out = v ? octstr_duplicate(v) : octstr_create("");
+    octstr_replace(out, octstr_imm("'"), octstr_imm("''"));
+    return out;
+}
+
+static void msglog_store(SMSCConn *conn, Msg *msg)
+{
+    DBPoolConn *pc;
+    Octstr *sql, *text, *e_smsc, *e_from, *e_to, *e_svc, *e_msg, *e_fid;
+    const Octstr *cid;
+
+    if (msglog_pool == NULL || msg_type(msg) != sms)
+        return;
+
+    text = msg->sms.msgdata ? octstr_duplicate(msg->sms.msgdata) : octstr_create("");
+    if (msg->sms.coding == DC_8BIT || msg->sms.coding == DC_UCS2)
+        octstr_binary_to_hex(text, 1);
+    else
+        octstr_convert_printable(text);
+
+    if (conn && smscconn_id(conn))
+        cid = smscconn_id(conn);
+    else if (msg->sms.smsc_id)
+        cid = msg->sms.smsc_id;
+    else
+        cid = octstr_imm("");
+
+    e_smsc = msglog_esc(cid);
+    e_from = msglog_esc(msg->sms.sender);
+    e_to   = msglog_esc(msg->sms.receiver);
+    e_svc  = msglog_esc(msg->sms.service);
+    e_msg  = msglog_esc(text);
+    e_fid  = msglog_esc(msg->sms.foreign_id);
+
+    sql = octstr_format(
+        "INSERT INTO message_log "
+        "(type, smsc, sender, receiver, service, msg, dlr_mask, foreign_id) "
+        "VALUES ('%s', '%s', '%s', '%s', '%s', '%s', %ld, '%s')",
+        msglog_type(msg),
+        octstr_get_cstr(e_smsc), octstr_get_cstr(e_from), octstr_get_cstr(e_to),
+        octstr_get_cstr(e_svc), octstr_get_cstr(e_msg),
+        msg->sms.dlr_mask, octstr_get_cstr(e_fid));
+
+    if ((pc = dbpool_conn_consume(msglog_pool)) != NULL) {
+        if (dbpool_conn_update(pc, sql, NULL) == -1)
+            warning(0, "msglog: failed to store message event");
+        dbpool_conn_produce(pc);
+    }
+
+    octstr_destroy(sql);
+    octstr_destroy(text);
+    octstr_destroy(e_smsc); octstr_destroy(e_from); octstr_destroy(e_to);
+    octstr_destroy(e_svc); octstr_destroy(e_msg); octstr_destroy(e_fid);
+}
+#endif /* HAVE_PGSQL */
+
+
+void msglog_init(Cfg *cfg)
+{
+#ifdef HAVE_PGSQL
+    CfgGroup *grp;
+    List *grplist;
+    Octstr *id, *p, *host, *user, *pass, *db;
+    long port = 0, pool_size;
+    DBConf *conf;
+    DBPoolConn *pc;
+    Octstr *sql;
+
+    grp = cfg_get_single_group(cfg, octstr_imm("core"));
+    id = grp ? cfg_get(grp, octstr_imm("msglog-pgsql-id")) : NULL;
+    if (id == NULL)
+        return;   /* message logging not enabled */
+
+    /* locate the matching pgsql-connection group */
+    grplist = cfg_get_multi_group(cfg, octstr_imm("pgsql-connection"));
+    grp = NULL;
+    while (grplist && (grp = gwlist_extract_first(grplist)) != NULL) {
+        p = cfg_get(grp, octstr_imm("id"));
+        if (p != NULL && octstr_compare(p, id) == 0) {
+            octstr_destroy(p);
+            break;
+        }
+        octstr_destroy(p);
+        grp = NULL;
+    }
+    gwlist_destroy(grplist, NULL);
+    if (grp == NULL) {
+        error(0, "msglog: pgsql-connection id '%s' not found; logging disabled.",
+              octstr_get_cstr(id));
+        octstr_destroy(id);
+        return;
+    }
+
+    host = cfg_get(grp, octstr_imm("host"));
+    user = cfg_get(grp, octstr_imm("username"));
+    pass = cfg_get(grp, octstr_imm("password"));
+    db   = cfg_get(grp, octstr_imm("database"));
+    cfg_get_integer(&port, grp, octstr_imm("port"));
+    if (cfg_get_integer(&pool_size, grp, octstr_imm("max-connections")) == -1 || pool_size <= 0)
+        pool_size = 1;
+
+    if (host == NULL || user == NULL || pass == NULL || db == NULL) {
+        error(0, "msglog: incomplete pgsql-connection '%s'; logging disabled.",
+              octstr_get_cstr(id));
+        octstr_destroy(id); octstr_destroy(host); octstr_destroy(user);
+        octstr_destroy(pass); octstr_destroy(db);
+        return;
+    }
+
+    conf = gw_malloc(sizeof(DBConf));
+    conf->pgsql = gw_malloc(sizeof(PgSQLConf));
+    conf->pgsql->host = host;
+    conf->pgsql->port = port;
+    conf->pgsql->username = user;
+    conf->pgsql->password = pass;
+    conf->pgsql->database = db;
+
+    msglog_pool = dbpool_create(DBPOOL_PGSQL, conf, pool_size);
+    if (msglog_pool == NULL || dbpool_conn_count(msglog_pool) == 0) {
+        error(0, "msglog: could not connect to PgSQL; logging disabled.");
+        octstr_destroy(id);
+        return;
+    }
+
+    /* ensure schema exists */
+    sql = octstr_create(
+        "CREATE TABLE IF NOT EXISTS message_log ("
+        "  id BIGSERIAL PRIMARY KEY,"
+        "  ts TIMESTAMPTZ NOT NULL DEFAULT now(),"
+        "  type VARCHAR(8),"
+        "  smsc VARCHAR(64),"
+        "  sender VARCHAR(64),"
+        "  receiver VARCHAR(64),"
+        "  service VARCHAR(64),"
+        "  msg TEXT,"
+        "  dlr_mask INTEGER,"
+        "  foreign_id VARCHAR(128)"
+        ")");
+    if ((pc = dbpool_conn_consume(msglog_pool)) != NULL) {
+        dbpool_conn_update(pc, sql, NULL);
+        octstr_destroy(sql);
+        sql = octstr_create("CREATE INDEX IF NOT EXISTS message_log_ts_idx ON message_log (ts DESC)");
+        dbpool_conn_update(pc, sql, NULL);
+        octstr_destroy(sql);
+        sql = octstr_create("CREATE INDEX IF NOT EXISTS message_log_type_idx ON message_log (type)");
+        dbpool_conn_update(pc, sql, NULL);
+        dbpool_conn_produce(pc);
+    }
+    octstr_destroy(sql);
+
+    info(0, "msglog: message logging enabled (Inbox/Outbox/DLR reports).");
+    octstr_destroy(id);
+#endif /* HAVE_PGSQL */
+}
+
+
+void msglog_shutdown(void)
+{
+#ifdef HAVE_PGSQL
+    if (msglog_pool != NULL) {
+        dbpool_destroy(msglog_pool);
+        msglog_pool = NULL;
+    }
+#endif
+}
+
+
+/*
+ * Return recent message_log rows of a given type ("MO", "MT" or "DLR") as a
+ * JSON array, most recent first. Returns "[]" if disabled or on error.
+ */
+Octstr *msglog_query_json(Octstr *type, long limit)
+{
+    Octstr *json = octstr_create("[");
+#ifdef HAVE_PGSQL
+    DBPoolConn *pc;
+    Octstr *sql, *e_type;
+    List *result = NULL, *row;
+    int first = 1;
+
+    if (msglog_pool == NULL) {
+        octstr_append_char(json, ']');
+        return json;
+    }
+    if (limit <= 0 || limit > 1000)
+        limit = 100;
+    e_type = msglog_esc(type);
+
+    sql = octstr_format(
+        "SELECT to_char(ts,'YYYY-MM-DD HH24:MI:SS'), smsc, sender, receiver, "
+        "service, msg, dlr_mask, foreign_id FROM message_log "
+        "WHERE type='%s' ORDER BY ts DESC LIMIT %ld",
+        octstr_get_cstr(e_type), limit);
+    octstr_destroy(e_type);
+
+    if ((pc = dbpool_conn_consume(msglog_pool)) != NULL) {
+        dbpool_conn_select(pc, sql, NULL, &result);
+        dbpool_conn_produce(pc);
+    }
+    octstr_destroy(sql);
+
+    if (result != NULL) {
+        while ((row = gwlist_extract_first(result)) != NULL) {
+            Octstr *field;
+            int i;
+            const char *keys[] = {"time","smsc","sender","receiver","service","msg","dlr_mask","foreign_id"};
+            if (!first) octstr_append_char(json, ',');
+            first = 0;
+            octstr_append_char(json, '{');
+            for (i = 0; i < 8; i++) {
+                field = gwlist_get(row, i);
+                if (i) octstr_append_char(json, ',');
+                octstr_format_append(json, "\"%s\":", keys[i]);
+                if (field == NULL) {
+                    octstr_append_cstr(json, "\"\"");
+                } else {
+                    /* JSON-escape the value */
+                    Octstr *v = octstr_duplicate(field);
+                    octstr_replace(v, octstr_imm("\\"), octstr_imm("\\\\"));
+                    octstr_replace(v, octstr_imm("\""), octstr_imm("\\\""));
+                    octstr_replace(v, octstr_imm("\n"), octstr_imm("\\n"));
+                    octstr_replace(v, octstr_imm("\r"), octstr_imm("\\r"));
+                    octstr_replace(v, octstr_imm("\t"), octstr_imm("\\t"));
+                    octstr_format_append(json, "\"%S\"", v);
+                    octstr_destroy(v);
+                }
+            }
+            octstr_append_char(json, '}');
+            gwlist_destroy(row, octstr_destroy_item);
+        }
+        gwlist_destroy(result, NULL);
+    }
+#endif /* HAVE_PGSQL */
+    octstr_append_char(json, ']');
+    return json;
+}
 
 
 /********************************************************************
@@ -376,6 +641,11 @@ void bb_alog_sms(SMSCConn *conn, Msg *msg, const char *message)
     Octstr *text = NULL;
     
     gw_assert(msg_type(msg) == sms);
+
+#ifdef HAVE_PGSQL
+    /* persist for the admin panel Inbox/Outbox/DLR reports (best-effort) */
+    msglog_store(conn, msg);
+#endif
 
     /* if we don't have any custom log, then use our "default" one */
     
