@@ -2,6 +2,148 @@
 
 All notable changes to Kamex (formerly Kannel) will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- **IPv6 support, opt-in via `ipv6 = true` in the `core` group.** Off by default,
+  so an existing deployment behaves exactly as before until it is turned on. The
+  setting gates both ends: with it off the wildcard listener binds `AF_INET` and
+  outbound resolution asks for `AF_INET` only, which is indistinguishable from
+  the previous behaviour. Read once at startup by bearerbox, smsbox, OpenSMPPBox
+  and RabbitMQBox via the new `socket_enable_ipv6()`.
+  - SQLBox takes the same setting from its **`sqlbox` group** rather than from
+    `core`, because it reads its own configuration file and that schema
+    (`sqlbox-cfg.def`) has no core group at all. Without it SQLBox would stay
+    IPv4-only and become the one single-stack hop in a
+    smsbox -> SQLBox -> bearerbox chain.
+  - Name resolution uses `getaddrinfo()` instead of `gethostbyname()`, so AAAA
+    records and literal IPv6 addresses resolve; previously any IPv6-only host
+    failed with `gethostbyname failed`.
+  - Outgoing connections try every address the resolver returns, across both
+    families. The socket is created per candidate, since the family is only known
+    after resolution.
+  - With `ipv6 = true` the wildcard listener binds the IPv6 wildcard with
+    `IPV6_V6ONLY` cleared so one socket serves both families, falling back to
+    IPv4 if that cannot be set up. A *named* interface still resolves IPv4 first,
+    matching what `gethostbyname()` returned, because one port is one socket:
+    `admin-interface = "localhost"` keeps serving IPv4 clients. An IPv6-only name
+    yields an IPv6 listener.
+  - Bracketed IPv6 literals in URLs (`http://[::1]:8080/x`) now parse. The port
+    separator is located after the closing bracket, which must precede the path,
+    and the brackets are stripped before the host reaches `getaddrinfo()`.
+  - New `http_host_for_url()` re-brackets a host on the way out, so a `Host:`
+    header and any rebuilt URL are RFC 3986 sec. 3.2.2 / RFC 7230 sec. 5.4
+    conformant.
+  - New `checks/check_sockaddr` and `checks/check_url` regression tests.
+
+### Fixed
+- **Truncated peer addresses on `accept()`.** `gw_accept()` and the listeners in
+  bearerbox, smsbox, the fake and EMI SMSC drivers, SQLBox, OpenSMPPBox and
+  `test/drive_smpp` received peer addresses into a `struct sockaddr_in` (or a bare
+  `struct sockaddr`), which is too small for an IPv6 peer. They now use
+  `struct sockaddr_storage`. Latent while every listener was IPv4-only.
+- `errno` is captured immediately after `connect()` in the non-blocking path.
+  `freeaddrinfo()`, `error()` and `octstr_destroy()` ran before it was tested and
+  none of them promise to preserve it, so a clobbered value could misread a
+  pending connect as a failure.
+- A wildcard listener that cannot clear `IPV6_V6ONLY` now gives up that candidate
+  and falls back to IPv4 instead of warning and binding IPv6-only. On platforms
+  where dual-stack sockets are forbidden this would otherwise have silently
+  stopped serving IPv4.
+- Per-candidate connect failures log at warning level while further candidates
+  remain, so a dual-stack destination that works on the second address no longer
+  logs an error for the first.
+- **Every address after the first was dead code for a multi-homed host, IPv4
+  included.** The old loop reused one socket across candidates, and on Linux a
+  `connect()` retried on a socket whose previous attempt failed returns an error
+  unconditionally - so a host with several A records only ever really tried the
+  first. Creating the socket per candidate was needed for IPv6, where consecutive
+  candidates differ in family, but it repairs the IPv4 case as a side effect: a
+  multi-A host whose first address is down can now succeed on a later one.
+- `parse_url()` refuses trailing garbage after an IPv6 literal. Anything between
+  the closing bracket and the port, path, query or fragment is rejected, so
+  `http://[::1]extra/foo` no longer parses with a host of `[::1]extra`, and
+  `http://[::1?foo]bar` no longer parses with a host of `[::1` and emits an
+  unbalanced `Host:` header. Both are refused without brackets, and accepting a
+  bracketed literal must not be the looser path. `http://[::1]@evil.com/`, which
+  previously tripped an assertion in `octstr_copy()`, is refused by the same
+  check.
+
+### Changed
+- **Two log levels moved, visible on an IPv4-only system too.** A connect failure
+  is logged at `warning` rather than `error` while another candidate remains -
+  only the last one is an error - and a listener whose name fails to resolve in
+  one family logs at `debug` rather than `error`, since the caller may still have
+  another family to try. A genuinely unusable `admin-interface` still produces an
+  error. Anyone scraping logs for `ERROR:` should know these moved.
+- `gw_sockaddr_to_octstr()` renders IPv4-mapped addresses as plain IPv4, so a
+  dual-stack listener describes an IPv4 peer the familiar way and IPv4-style
+  ACLs keep matching. It never returns NULL: the result is stored on connection
+  objects and logged widely, and an unrecognised address family yields a
+  placeholder rather than a NULL surfacing far from the call site.
+
+### Access control, and what the dual-stack change requires
+These are consequences of making listeners dual-stack, not fixes to a
+pre-existing hole: with `ipv6` off - the default - every listener is `AF_INET`
+only, no IPv6 peer can connect, and none of the below applies. The matcher
+consults the same setting, so with IPv6 off an address is matched exactly as it
+was before this change; the rules below take effect only once it is turned on.
+- `*` and `*.*.*.*` are treated as "any address" in both families, so a
+  deny-everything rule denies IPv6 peers too. **Only those two exact forms.** A
+  partial wildcard such as `*.*` still matches no real address, exactly as
+  before - treating it as universal would have turned an inert allow-list entry
+  into allow-all, for IPv4 as well.
+  Note the flip side: an *allow* rule written `*.*.*.*` now admits IPv6 peers.
+  A deny list that enumerates IPv4 subnets, e.g. `box-deny-ip = "10.0.0.*"` with
+  no allow list, matches no IPv6 peer and therefore admits it. Review such rules
+  before enabling `ipv6`.
+- A loopback rule in one family covers the other family's loopback, because
+  `getaddrinfo()` returns `::1` before `127.0.0.1` for `localhost`: smsbox
+  reaches bearerbox over IPv6 and a dual-stack listener sees `::1`, so
+  `box-allow-ip = "127.0.0.1"` would otherwise start rejecting smsbox. The IPv4
+  side is a prefix test, so a rule naming `::1` accepts any `127.x.y.z` peer and
+  vice versa; both are loopback. Within one family the normal globbing applies -
+  `127.0.0.1` still does not match `127.0.0.2`.
+- `connect_denied()`'s implicit localhost-only default covers `::1` as well as
+  `127.0.0.1`.
+- Also expect local peers to appear as `::1` in logs, status pages and access
+  logs once `ipv6` is on; log parsers expecting dotted quads need adjusting.
+- A multi-host setup whose bearerbox hostname has an AAAA record will see smsbox
+  arrive from the IPv6 address, which an IPv4-subnet `box-allow-ip` will not
+  match. There is no shim for that case: list the IPv6 address, or leave `ipv6`
+  off.
+
+### Known limitations
+- A non-blocking connect cannot fall back after `EINPROGRESS`: the caller polls
+  for completion, so if that candidate - typically the IPv6 one - fails
+  asynchronously, the remaining addresses are never tried. On a host whose IPv6
+  route is black-holed this makes an outbound connection fail where an IPv4-only
+  build succeeded. `ipv6 = false` is the remedy; retrying across the deferred
+  failure needs the candidate list to outlive the call and is left for later.
+- URLs combining userinfo with an IPv6 literal are rejected -
+  `http://user@[::1]/x` as well as `http://user:pass@[::1]/x`. Unchanged from
+  before this work, and fail-closed. Note `http://[::1]@evil.com/` is a
+  different shape: it used to trip an assertion inside `octstr_copy()` rather
+  than being refused, and is now rejected by the trailing-garbage check below.
+- Matching in the access lists is textual: `0:0:0:0:0:0:0:1` is not recognised as
+  `::1`, and hex case is significant.
+- A bare `*` in an access list has never matched a dotted quad - the matcher
+  advances a wildcard only as far as the next dot - so a deny list of `*` still
+  denies nobody, in either mode. That is unchanged here, and deliberately so:
+  making it universal in the IPv4 case too would alter what existing
+  configurations mean. Write `*.*.*.*`, which does match.
+- Not covered, and unchanged by this work: the UDP helpers (`udp_bind()`,
+  `udp_create_address()` and friends) are still IPv4-only and still resolve with
+  `gethostbyname()`. Nothing calls them since the WAP and RADIUS removal - only
+  `test/test_udp` does, and it passes an explicit `0.0.0.0`.
+- Also not covered: RabbitMQBox reaches its broker through librabbitmq's own
+  `amqp_socket_t`, not through gwlib, so the `ipv6` setting does not govern that
+  connection. It governs RabbitMQBox's link to bearerbox, which does use gwlib.
+- The official hostname and IP shown in the startup banner are resolved from
+  `gwlib_init()`, before any configuration has been read, so they are always
+  looked up over IPv4. On an IPv6-only host the banner still reports
+  `127.0.0.1`. Cosmetic: these two values are not used for anything else.
+
 ## [1.8.7] - 2026-08-05
 
 ### Fixed

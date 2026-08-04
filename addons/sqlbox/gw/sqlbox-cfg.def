@@ -6,6 +6,7 @@
  */
 
 SINGLE_GROUP(sqlbox,
+    OCTSTR(ipv6)
     OCTSTR(id)
     OCTSTR(smsbox-id)
     OCTSTR(global-sender)

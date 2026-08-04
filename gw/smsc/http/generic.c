@@ -520,10 +520,14 @@ static int generic_send_sms(SMSCConn *conn, Msg *sms)
 
     /* Split now in HTTP GET or HTTP POST handling. */
     if (conndata->use_post && (p = parse_url(url)) != NULL) {
+        Octstr *hostpart;
+
         octstr_destroy(url);
+        hostpart = http_host_for_url(p->host);
         url = octstr_format("%s%s:%ld%s",
-                octstr_get_cstr(p->scheme), octstr_get_cstr(p->host),
+                octstr_get_cstr(p->scheme), octstr_get_cstr(hostpart),
                 p->port, octstr_get_cstr(p->path));
+        octstr_destroy(hostpart);
         debug("smsc.http.generic", 0, "HTTP[%s]: Sending POST request <%s>",
               octstr_get_cstr(conn->id), octstr_get_cstr(url));
         http_header_add(headers, "Content-Type", octstr_get_cstr(content_type));

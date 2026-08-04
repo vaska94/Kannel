@@ -754,15 +754,102 @@ int get_and_set_debugs(int argc, char **argv,
 }
 
 
+/*
+ * Is this pattern the idiom that unambiguously means "any address"?
+ *
+ * Only "*.*.*.*", and deliberately not "any string of wildcards and dots": the
+ * matcher below advances a wildcard only up to the next dot, so a pattern like
+ * "*.*" matches no real IPv4 address today, and treating it as universal would
+ * silently turn an inert allow-list entry into allow-all.
+ *
+ * A bare "*" is excluded for exactly that reason. It matches no dotted quad
+ * either, so making it universal would widen an IPv4 allow list - a rule such as
+ *     box-allow-ip = "*"
+ *     box-deny-ip  = "1.2.3.4"
+ * would start admitting 1.2.3.4 merely because IPv6 was switched on, which is
+ * not something the directive's name suggests. "*.*.*.*" carries no such risk,
+ * since it already glob-matches every dotted quad.
+ *
+ * That a deny list of "*" therefore denies nobody is a pre-existing wart, not
+ * something this gets to fix: correcting it changes IPv4 behaviour and belongs
+ * in its own change.
+ */
+static int pattern_is_universal(Octstr *pattern)
+{
+    return octstr_compare(pattern, octstr_imm("*.*.*.*")) == 0;
+}
+
+
+/* The IPv6 loopback, written out. */
+static int is_v6_loopback(Octstr *s)
+{
+    return octstr_compare(s, octstr_imm("::1")) == 0;
+}
+
+/*
+ * Anything that starts with "127." - the whole of 127.0.0.0/8, and also globs
+ * such as "127.0.0.*". Note this is a prefix test, so a rule naming ::1 accepts
+ * any 127.x.y.z peer and vice versa; both are loopback, so the breadth is
+ * intentional.
+ */
+static int is_v4_loopback(Octstr *s)
+{
+    return octstr_search(s, octstr_imm("127."), 0) == 0;
+}
+
+
 static int pattern_matches_ip(Octstr *pattern, Octstr *ip)
 {
     long i, j;
     long pat_len, ip_len;
     int pat_c, ip_c;
-    
+
     pat_len = octstr_len(pattern);
     ip_len = octstr_len(ip);
 
+    /*
+     * Everything from here to the plain glob matcher below applies only when
+     * IPv6 has been turned on. With it off no listener accepts an IPv6 peer, so
+     * these rules would have no work to do - and enabling them anyway would
+     * change what existing IPv4-only configurations mean, which the `ipv6'
+     * setting exists precisely to avoid.
+     */
+    if (!socket_ipv6_enabled())
+        goto glob;
+
+    /*
+     * "*.*.*.*" means "any address", so honour it for every address family. The
+     * matcher below advances a wildcard up to the next dot, and IPv6 addresses
+     * contain none, so it could otherwise never match one. That matters because
+     * a listener accepting both families would then let IPv6 peers straight past
+     * a deny-everything rule such as:
+     *     box-deny-ip  = "*.*.*.*"
+     *     box-allow-ip = "127.0.0.1;::1"
+     * To restrict a single family, spell the addresses out instead of relying on
+     * a wildcard pattern.
+     */
+    if (pattern_is_universal(pattern))
+        return 1;
+
+    /*
+     * A loopback rule written in one family also covers the other family's
+     * loopback. A rule such as
+     *     box-allow-ip = "127.0.0.1"
+     * means "local connections only", and ::1 is a local connection. This
+     * matters because a listener accepting both families sees a local peer as
+     * ::1 whenever the resolver returns the IPv6 address first - which
+     * getaddrinfo() does for "localhost" - so without this an existing
+     * IPv4-only loopback ACL would start rejecting smsbox after an upgrade.
+     *
+     * Deliberately limited to the CROSS-family case: within one family the
+     * normal glob matching still applies, so "127.0.0.1" does not match
+     * 127.0.0.2.
+     */
+    if ((is_v6_loopback(pattern) && is_v4_loopback(ip)) ||
+        (is_v4_loopback(pattern) && is_v6_loopback(ip)))
+        return 1;
+
+glob:
     i = 0;
     j = 0;
     while (i < pat_len && j < ip_len) {
@@ -833,9 +920,16 @@ int connect_denied(Octstr *allow_ip, Octstr *ip)
     if (ip == NULL)
 	return 1;
 
-    /* If IP not set, allow from Localhost */
-    if (allow_ip == NULL) { 
-	if (pattern_list_matches_ip(octstr_imm("127.0.0.1"), ip))
+    /*
+     * If IP not set, allow from Localhost. With IPv6 on, both loopback forms
+     * are listed: a listener accepting IPv6 as well as IPv4 sees local clients
+     * as ::1, which the IPv4 literal alone would reject. With IPv6 off the list
+     * stays exactly what it was, like every other rule in this file.
+     */
+    if (allow_ip == NULL) {
+	if (pattern_list_matches_ip(socket_ipv6_enabled()
+				    ? octstr_imm("127.0.0.1;::1")
+				    : octstr_imm("127.0.0.1"), ip))
 	    return 0;
     } else {
 	if (pattern_list_matches_ip(allow_ip, ip))

@@ -866,6 +866,16 @@ static int read_config(Octstr *filename)
         error(0, "Missing 'core' group in config");
         return -1;
     }
+    /*
+     * IPv6 is opt-in: read it before any socket is created, so that with the
+     * setting absent this build behaves exactly like an IPv4-only one.
+     */
+    {
+        int use_ipv6 = 0;
+        cfg_get_bool(&use_ipv6, grp, octstr_imm("ipv6"));
+        socket_enable_ipv6(use_ipv6);
+    }
+
 
     /* Log settings */
     log_file = cfg_get(grp, octstr_imm("log-file"));

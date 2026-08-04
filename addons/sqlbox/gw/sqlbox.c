@@ -361,7 +361,7 @@ static Boxc *accept_boxc(int fd, int ssl)
     Octstr *ip;
 
     int newfd;
-    struct sockaddr_in client_addr;
+    struct sockaddr_storage client_addr;
     socklen_t client_addr_len;
 
     client_addr_len = sizeof(client_addr);
@@ -370,7 +370,7 @@ static Boxc *accept_boxc(int fd, int ssl)
     if (newfd < 0)
         return NULL;
 
-    ip = host_ip(client_addr);
+    ip = gw_sockaddr_to_octstr((struct sockaddr *) &client_addr);
 
     // if (is_allowed_ip(box_allow_ip, box_deny_ip, ip) == 0) {
         // info(0, "Box connection tried from denied host <%s>, disconnected",
@@ -822,6 +822,35 @@ static void init_sqlbox(Cfg *cfg)
     grp = cfg_get_single_group(cfg, octstr_imm("sqlbox"));
     if (grp == NULL)
         panic(0, "No 'sqlbox' group in configuration");
+
+    /*
+     * IPv6 is opt-in here as it is everywhere else, but the setting lives in
+     * the sqlbox group rather than in core: sqlbox reads its own configuration
+     * file, whose schema (sqlbox-cfg.def) has no core group at all. Must happen
+     * before sqlboxc_run() opens the listening socket.
+     */
+    {
+        int use_ipv6 = 0;
+        CfgGroup *core;
+
+        cfg_get_bool(&use_ipv6, grp, octstr_imm("ipv6"));
+        socket_enable_ipv6(use_ipv6);
+
+        /*
+         * gwlib's config hook still accepts a core group here, so `ipv6' put
+         * there - the obvious guess, since that is where every other box takes
+         * it from - would parse without complaint and do nothing at all. Say so
+         * rather than leave the operator wondering why the setting had no
+         * effect.
+         */
+        core = cfg_get_single_group(cfg, octstr_imm("core"));
+        if (core != NULL) {
+            int stray = 0;
+            if (cfg_get_bool(&stray, core, octstr_imm("ipv6")) != -1)
+                warning(0, "'ipv6' in the core group is ignored by sqlbox; "
+                           "put it in the sqlbox group instead.");
+        }
+    }
 
     bearerbox_host = cfg_get( grp, octstr_imm("bearerbox-host"));
     if (bearerbox_host == NULL)

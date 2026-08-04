@@ -365,7 +365,7 @@ static void fake_listener(void *arg)
 {
     SMSCConn *conn = arg;
     PrivData *privdata = conn->data;
-    struct sockaddr_in client_addr;
+    struct sockaddr_storage client_addr;
     socklen_t client_addr_len;
     Octstr *ip;
     Connection *client;
@@ -398,7 +398,7 @@ static void fake_listener(void *arg)
             warning(errno, "fake_listener: accept() failed, retrying...");
             continue;
         }
-        ip = host_ip(client_addr);
+        ip = gw_sockaddr_to_octstr((struct sockaddr *) &client_addr);
         if (!is_allowed_ip(privdata->allow_ip, privdata->deny_ip, ip)) {
             info(0, "Fakesmsc connection tried from denied host <%s>, "
                     "disconnected", octstr_get_cstr(ip));

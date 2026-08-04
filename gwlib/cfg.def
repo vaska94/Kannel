@@ -75,6 +75,7 @@
 
 
 SINGLE_GROUP(core,
+    OCTSTR(ipv6)
     OCTSTR(admin-port)
     OCTSTR(admin-port-ssl)
     OCTSTR(admin-interface)

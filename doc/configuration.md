@@ -120,6 +120,43 @@ a non-production bearerbox first.
 | `ssl-trusted-ca-file` | path | CA bundle used to verify servers Kamex connects to |
 | `ssl-verify-host` | bool | Require outbound TLS certificates to match the host (default `false`) |
 | `ssl-client-certkey-file` | path | Client certificate + key for outbound TLS |
+| `ipv6` | bool | Enable IPv6 (default `false`) — see below |
+
+### IPv6
+
+```
+group = core
+ipv6 = true
+```
+
+Off by default. With it off, Kamex resolves and listens over IPv4 exactly as it
+always has. With it on:
+
+- Listeners on the wildcard address serve IPv4 and IPv6 from one socket, so the
+  admin port answers on both `127.0.0.1` and `[::1]`. A listener bound to a
+  *named* interface still binds one address: the name is resolved as IPv4 first,
+  so `admin-interface = "localhost"` keeps serving IPv4 clients. Give an IPv6
+  literal to bind IPv6.
+- Outgoing connections (SMSC hosts, `dlr-url`, `sms-service`) resolve AAAA as
+  well as A records and try every address returned. IPv6 literals must be
+  bracketed in URLs: `http://[2001:db8::1]:8080/dlr`.
+
+Read this before turning it on:
+
+- **Access lists change meaning.** A local peer starts arriving as `::1`, so it
+  appears that way in logs, status pages and access logs. `box-allow-ip =
+  "127.0.0.1"` keeps working — a loopback rule in one family covers the other —
+  but a rule naming IPv4 subnets, such as `box-allow-ip = "10.0.0.*"`, will not
+  match a peer that now arrives over IPv6. List the IPv6 address, or leave
+  `ipv6` off.
+- `*.*.*.*` means "any address" in both families. A bare `*` does not, and never
+  matched a dotted quad either; write `*.*.*.*` if you mean everything.
+- **SQLBox takes this setting from its own `sqlbox` group**, not from `core`,
+  because it parses its own configuration file. Writing `ipv6` in a `core` group
+  in a SQLBox configuration is accepted by the parser and ignored.
+- If the host has an IPv6 route that black-holes, an outgoing connection can
+  fail where an IPv4-only build succeeded, because a connection already in
+  progress cannot fall back. Set `ipv6 = false` if that happens.
 
 ## SMSBox Group
 

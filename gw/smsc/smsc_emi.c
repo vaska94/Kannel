@@ -1480,7 +1480,7 @@ static void emi2_listener(void *arg)
 {
     SMSCConn *conn = arg;
     PrivData *privdata = conn->data;
-    struct sockaddr_in server_addr;
+    struct sockaddr_storage server_addr;
     socklen_t server_addr_len;
     Octstr *ip;
     Connection *server;
@@ -1518,7 +1518,7 @@ static void emi2_listener(void *arg)
                     octstr_get_cstr(privdata->name));
             continue;
         }
-        ip = host_ip(server_addr);
+        ip = gw_sockaddr_to_octstr((struct sockaddr *) &server_addr);
         if (!is_allowed_ip(privdata->allow_ip, privdata->deny_ip, ip)) {
             info(0, "EMI2[%s]: smsc connection tried from denied host <%s>,"
                     " disconnected", octstr_get_cstr(privdata->name),
