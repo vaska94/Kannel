@@ -2,6 +2,22 @@
 
 All notable changes to Kamex (formerly Kannel) will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- **PostgreSQL DLR storage silently stopped working on PostgreSQL 12+** - the
+  driver located single rows with `WHERE oid = (SELECT oid ...)`, but user tables
+  have not carried an `oid` system column since PostgreSQL 12 removed
+  `default_with_oids`. Both statements failed with
+  `column "oid" does not exist`, so:
+  - consumed DLRs were never deleted, and the table grew by one row per message
+    for the lifetime of the deployment
+  - intermediate DLR status updates were never applied
+  Delivery receipts still reached the application, which is why this went
+  unnoticed. Both statements now use `ctid`, which every server version provides
+  and which gives the same "exactly one matching row" guarantee within a single
+  statement.
+
 ## [1.8.1] - 2026-01-18
 
 ### Added
