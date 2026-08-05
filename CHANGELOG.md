@@ -2,9 +2,18 @@
 
 All notable changes to Kamex (formerly Kannel) will be documented in this file.
 
-## [Unreleased]
+## [1.8.4] - 2026-08-05
 
 ### Fixed
+- **SMPP binds failed with passwords longer than 8 characters** - the SMPP 3.4
+  spec caps the bind `password` field at 9 octets, but many commercial operators
+  use credentials up to 16 characters. Outbound binds silently truncated the
+  configured password to 8 characters (the operator then rejected the bind), and
+  inbound binds to OpenSMPPBox with a long password failed with misparsed PDU
+  fields. The field limit in the bind PDUs (`bind_transmitter`, `bind_receiver`,
+  `bind_transceiver`, `outbind`) is now 17 octets, allowing 16-character
+  passwords in both directions. Operators using spec-compliant passwords are
+  unaffected. (#1)
 - **PostgreSQL DLR storage silently stopped working on PostgreSQL 12+** - the
   driver located single rows with `WHERE oid = (SELECT oid ...)`, but user tables
   have not carried an `oid` system column since PostgreSQL 12 removed

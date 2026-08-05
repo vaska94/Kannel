@@ -127,7 +127,7 @@ PDU(bind_transmitter,
     0x00000002,
     HEADER
     NULTERMINATED(system_id, 16)
-    NULTERMINATED(password, 9)
+    NULTERMINATED(password, 17)
     NULTERMINATED(system_type, 13)
     INTEGER(interface_version, 1)
     INTEGER(addr_ton, 1)
@@ -148,7 +148,7 @@ PDU(bind_receiver,
     0x00000001,
     HEADER
     NULTERMINATED(system_id, 16)
-    NULTERMINATED(password, 9)
+    NULTERMINATED(password, 17)
     NULTERMINATED(system_type, 13)
     INTEGER(interface_version, 1)
     INTEGER(addr_ton, 1)
@@ -169,7 +169,7 @@ PDU(bind_transceiver,
     0x00000009,
     HEADER
     NULTERMINATED(system_id, 16)
-    NULTERMINATED(password, 9)
+    NULTERMINATED(password, 17)
     NULTERMINATED(system_type, 13)
     INTEGER(interface_version, 1)
     INTEGER(addr_ton, 1)
@@ -190,7 +190,7 @@ PDU(outbind,
     0x0000000B,
     HEADER
     NULTERMINATED(system_id, 16)
-    NULTERMINATED(password, 9)
+    NULTERMINATED(password, 17)
 )
 
 PDU(unbind,
