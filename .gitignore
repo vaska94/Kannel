@@ -162,3 +162,5 @@ gw-config
 contrib/systemd/kamex-bearerbox.service
 contrib/systemd/kamex-smsbox.service
 contrib/systemd/kamex-sqlbox.service
+check.log
+check.log.new

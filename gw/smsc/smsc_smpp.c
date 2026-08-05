@@ -1170,7 +1170,7 @@ static SMPP_PDU *msg_to_pdu(SMPP *smpp, Msg *msg)
 }
 
 
-static int send_enquire_link(SMPP *smpp, Connection *conn, long *last_sent)
+static int send_enquire_link(SMPP *smpp, Connection *conn, time_t *last_sent)
 {
     SMPP_PDU *pdu;
     Octstr *os;
@@ -1560,7 +1560,7 @@ static Msg *handle_dlr(SMPP *smpp, Octstr *destination_addr, Octstr *short_messa
             /* first try sscanf way if thus failed then old way */
             ret = sscanf(octstr_get_cstr(respstr),
                          "id:%64[^ ] sub:%d dlvrd:%d submit date:%14[0-9] done "
-                         "date:%14[0-9] stat:%15[^ ] err:%3[^ ]",
+                         "date:%14[0-9] stat: %15[^ ] err: %3[^ ]",
                          id_cstr, &sub, &dlrvrd, sub_d_cstr, done_d_cstr,
                          stat_cstr, err_cstr);
             if (ret == 7) {
@@ -1605,6 +1605,13 @@ static Msg *handle_dlr(SMPP *smpp, Octstr *destination_addr, Octstr *short_messa
                 } else {
                     dlr_err = NULL;
                 }
+                /*
+                 * The sscanf path above fills err_int from err_cstr; do the
+                 * same here, otherwise the network error code reported to the
+                 * DLR consumer is always zero.
+                 */
+                if (dlr_err != NULL)
+                    sscanf(octstr_get_cstr(dlr_err), "%d", &err_int);
             }
 
             /*
@@ -1615,13 +1622,13 @@ static Msg *handle_dlr(SMPP *smpp, Octstr *destination_addr, Octstr *short_messa
              *          we doesn't requested these.
              */
             if (dlrstat == -1) {
-                if (stat != NULL && octstr_compare(stat, octstr_imm("DELIVRD")) == 0)
+                if (stat != NULL && octstr_case_compare(stat, octstr_imm("DELIVRD")) == 0)
                     dlrstat = DLR_SUCCESS;
-                else if (stat != NULL && (octstr_compare(stat, octstr_imm("ACCEPTD")) == 0 ||
-                                octstr_compare(stat, octstr_imm("ACKED")) == 0 ||
-                                octstr_compare(stat, octstr_imm("BUFFRED")) == 0 ||
-                                octstr_compare(stat, octstr_imm("BUFFERD")) == 0 ||
-                                octstr_compare(stat, octstr_imm("ENROUTE")) == 0))
+                else if (stat != NULL && (octstr_case_compare(stat, octstr_imm("ACCEPTD")) == 0 ||
+                                octstr_case_compare(stat, octstr_imm("ACKED")) == 0 ||
+                                octstr_case_compare(stat, octstr_imm("BUFFRED")) == 0 ||
+                                octstr_case_compare(stat, octstr_imm("BUFFERD")) == 0 ||
+                                octstr_case_compare(stat, octstr_imm("ENROUTE")) == 0))
                     dlrstat = DLR_BUFFERED;
                 else
                     dlrstat = DLR_FAIL;

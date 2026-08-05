@@ -3188,7 +3188,7 @@ static Cfg *init_smsbox(Cfg *cfg)
     if (reply_couldnotfetch == NULL)
 	reply_couldnotfetch = octstr_create("Could not fetch content, sorry.");
 
-    reply_couldnotrepresent= cfg_get(grp, octstr_imm("reply-couldnotfetch"));
+    reply_couldnotrepresent= cfg_get(grp, octstr_imm("reply-couldnotrepresent"));
     if (reply_couldnotrepresent == NULL)
 	reply_couldnotrepresent = octstr_create("Result could not be represented "
 					        "as an SMS message.");
