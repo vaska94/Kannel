@@ -30,6 +30,11 @@ done
 if test -s check.log
 then
 	echo At least one check failed, see \`check.log\'.
+	# Dump it too: on CI the file is not reachable after the job ends.
+	echo "--- check.log ---"
+	cat check.log
+	echo "--- end check.log ---"
+	exit 1
 else
 	echo All checks OK.
 	rm -f check.log

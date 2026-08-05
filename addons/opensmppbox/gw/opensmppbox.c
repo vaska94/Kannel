@@ -856,6 +856,7 @@ static List *msg_to_pdu(Boxc *box, Msg *msg)
 	case DLR_EXPIRED:
 		dlr_state = 3;
 		dlr_status = octstr_imm("EXPIRED");
+		break;
 	case DLR_BUFFERED:
 		dlr_state = 6;
 		dlr_status = octstr_imm("ACCEPTD");

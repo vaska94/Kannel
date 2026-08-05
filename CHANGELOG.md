@@ -2,6 +2,45 @@
 
 All notable changes to Kamex (formerly Kannel) will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- **SMPP delivery receipts with padded fields were parsed wrong, and reported a
+  fabricated error code.** The receipt parser required `stat:` and `err:` values
+  to follow the label with no space, so a real-world receipt of the form
+  `... stat:UNDELIV err: 042 ...` failed the strict parse and fell back to the
+  lenient path. That path never assigned the network error code, so **every**
+  fallback-parsed receipt reported error `0` regardless of what the SMSC sent.
+  Both are fixed: the parser now tolerates whitespace after the label, and the
+  fallback path parses the error code it extracted.
+- **SMPP receipt status matching is now case-insensitive.** A receipt carrying
+  `stat:delivrd` parsed correctly and was then silently reclassified as a
+  failure.
+- **`reply-couldnotrepresent` was read from the wrong configuration key.** It was
+  loaded from `reply-couldnotfetch`, so setting it had no effect while
+  `reply-couldnotfetch` silently overrode both messages. Because the correct name
+  is declared in the config schema, `-t` validation accepted it and gave no hint.
+  Inherited from Kannel; never reported upstream.
+- **OpenSMPPBox reported expired messages as accepted.** A missing `break` made
+  `DLR_EXPIRED` fall through to `DLR_BUFFERED`, so every expired receipt went out
+  as `stat:ACCEPTD` (state 6) instead of `stat:EXPIRED` (state 3). Upstream Kannel
+  has the same defect.
+- **Build failure on 32-bit time64 targets.** `send_enquire_link()` took a
+  `long *` while its caller passed a `time_t *`. Harmless on 64-bit, but an error
+  under GCC 14+ on platforms such as Debian i386/armhf, where it would also have
+  truncated the enquire-link timer.
+
+### Changed
+- `make check` now exits non-zero when a check fails and prints `check.log` to
+  stdout. Previously it announced the failure and exited 0, so failing tests
+  could pass unnoticed in CI.
+- Removed the unused `<openssl/engine.h>` include and `CRYPTO_CALLBACK_PTR`
+  typedef; the ENGINE header is gone in OpenSSL 4.0.
+- `dbpool_sqlite3` reports the runtime library version via `sqlite3_libversion()`
+  instead of the `sqlite3_version` symbol.
+- `checks/check.log.new` is no longer tracked; the check runner deleted it on
+  every run, leaving the working tree permanently dirty.
+
 ## [1.8.4] - 2026-08-05
 
 ### Fixed

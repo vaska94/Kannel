@@ -85,13 +85,10 @@
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 #include <openssl/conf.h>
-#include <openssl/engine.h>
 
 static SSL_CTX *global_ssl_context = NULL;
 static SSL_CTX *global_server_ssl_context = NULL;
 #endif /* HAVE_LIBSSL */
-
-typedef unsigned long (*CRYPTO_CALLBACK_PTR)(void);
 
 /*
  * This used to be 4096.  It is now 0 so that callers don't have to
