@@ -10,7 +10,9 @@ ENV SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH}
 COPY kamex-*.rpm /tmp/
 
 # Enable EPEL for hiredis - pin version for reproducibility
-RUN rpm -ivh https://dl.fedoraproject.org/pub/epel/10/Everything/x86_64/Packages/e/epel-release-10-7.el10_1.noarch.rpm && \
+# NOTE: superseded versions are removed from the mirror, so this pin must be
+# refreshed when EPEL bumps epel-release (check the Packages/e/ index on 404)
+RUN rpm -ivh https://dl.fedoraproject.org/pub/epel/10/Everything/x86_64/Packages/e/epel-release-10-8.el10_3.noarch.rpm && \
     microdnf install -y openssl hiredis mariadb-connector-c libpq freetds-libs && \
     rpm -ivh /tmp/kamex-*.rpm && \
     rm -f /tmp/*.rpm && \
