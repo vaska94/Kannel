@@ -228,7 +228,15 @@ static void dlr_pgsql_remove(const Octstr *smsc, const Octstr *ts, const Octstr 
     else
         like = octstr_imm("");
 
-    sql = octstr_format("DELETE FROM \"%S\" WHERE oid = (SELECT oid FROM "
+    /*
+     * ctid, not oid: user tables have not carried an oid system column since
+     * PostgreSQL 12 (default_with_oids was removed), so the oid form fails with
+     * "column \"oid\" does not exist" and no row is ever deleted. ctid is the
+     * physical row locator, is present in every server version, and gives the
+     * same "exactly one matching row" guarantee when read and used inside a
+     * single statement.
+     */
+    sql = octstr_format("DELETE FROM \"%S\" WHERE ctid = (SELECT ctid FROM "
           "\"%S\" WHERE \"%S\"='%S' AND \"%S\"='%S' %S LIMIT 1);",
           fields->table, fields->table, fields->field_smsc, smsc,
           fields->field_ts, ts, like);
@@ -250,8 +258,9 @@ static void dlr_pgsql_update(const Octstr *smsc, const Octstr *ts, const Octstr 
     else
         like = octstr_imm("");
 
-    sql = octstr_format("UPDATE \"%S\" SET \"%S\"=%d WHERE oid = (SELECT "
-        "oid FROM \"%S\" WHERE \"%S\"='%S' AND \"%S\"='%S' %S LIMIT 1);",
+    /* ctid rather than oid - see the note in dlr_pgsql_remove(). */
+    sql = octstr_format("UPDATE \"%S\" SET \"%S\"=%d WHERE ctid = (SELECT "
+        "ctid FROM \"%S\" WHERE \"%S\"='%S' AND \"%S\"='%S' %S LIMIT 1);",
         fields->table, fields->field_status, status, fields->table,
         fields->field_smsc, smsc, fields->field_ts, ts, like);
 
