@@ -2,7 +2,7 @@
 
 All notable changes to Kamex (formerly Kannel) will be documented in this file.
 
-## [Unreleased]
+## [1.8.6] - 2026-08-05
 
 ### Added
 - **SNI on outbound TLS connections.** The hostname was passed into
