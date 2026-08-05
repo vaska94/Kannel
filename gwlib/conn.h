@@ -331,6 +331,14 @@ void conn_use_global_server_certkey_file(Octstr *certfile, Octstr *keyfile);
 void conn_use_global_trusted_ca_file(Octstr *ssl_trusted_ca_file);
 
 /*
+ * Require that the certificate presented by an outbound TLS peer matches the
+ * host we connected to, rejecting the handshake otherwise. Implies peer
+ * verification, falling back to the system CA store when no explicit CA
+ * bundle was set, so call this after conn_use_global_trusted_ca_file().
+ */
+void conn_use_global_verify_host(int verify);
+
+/*
  * Specifies the encryption suites and ciphers that are allowed to be used.
  * Definition of the cipher string can be found at the openssl documentation
  * https://www.openssl.org/docs/manmaster/man1/ciphers.html

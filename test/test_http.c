@@ -370,6 +370,8 @@ static void help(void)
     info(0, "    use this file as the SSL certificate and key file");
     info(0, "-C ssl_ca_file");
     info(0, "    use this file as the SSL certificate authority");
+    info(0, "-N");
+    info(0, "    require the server certificate to match the requested host");
     info(0, "-f");
     info(0, "    don't follow redirects");
     info(0, "-V");
@@ -407,7 +409,7 @@ int main(int argc, char **argv)
     file = 0;
     fp = NULL;
     
-    while ((opt = getopt(argc, argv, "hv:qr:p:P:Se:t:i:a:u:sc:H:B:m:fVC:")) != EOF) {
+    while ((opt = getopt(argc, argv, "hv:qr:p:P:Se:t:i:a:u:sc:H:B:m:fVC:N")) != EOF) {
 	switch (opt) {
 	case 'v':
 	    log_set_output_level(atoi(optarg));
@@ -526,6 +528,10 @@ int main(int argc, char **argv)
         ca_file = octstr_create(optarg);
         conn_use_global_trusted_ca_file(ca_file);
         octstr_destroy(ca_file);
+        break;
+
+    case 'N':
+        conn_use_global_verify_host(1);
         break;
 #endif
 

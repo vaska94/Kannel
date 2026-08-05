@@ -2,6 +2,31 @@
 
 All notable changes to Kamex (formerly Kannel) will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- **SNI on outbound TLS connections.** The hostname was passed into
+  `conn_open_ssl()` and then discarded, so no `server_name` extension was sent.
+  Any server that selects a certificate by name — anything behind Cloudflare or
+  sharing an address between virtual hosts — either failed the handshake or
+  served the wrong certificate. SNI is now sent for host names and, per RFC 6066,
+  omitted for literal addresses.
+- **`ssl-verify-host` (core and sqlbox groups, default `false`).** When enabled,
+  a server Kamex connects to must present a certificate issued by a trusted CA
+  *and* issued for the host that was configured. Literal addresses are matched
+  against the certificate's IP SANs. Enabling it implies peer verification,
+  falling back to the system CA store when `ssl-trusted-ca-file` is unset.
+
+  Without it, outbound TLS remains unauthenticated: peer verification is off
+  unless a CA bundle is configured, and even then **any** valid certificate from
+  **any** host was accepted, because nothing compared the certificate to the host
+  requested. That affects SMPP over TLS, `dlr-url` callbacks and `sms-service`
+  fetches. It defaults to `false` only because turning it on can stop a gateway
+  from reaching an SMSC using a self-signed or name-mismatched certificate;
+  operators are encouraged to enable it. See `doc/configuration.md`.
+- `test/test_http` gained `-N` to require certificate/host matching, so the
+  behaviour above can be exercised directly.
+
 ## [1.8.5] - 2026-08-05
 
 Fixes mined from the upstream Kannel mailing list archives and Debian's patch
