@@ -2,7 +2,11 @@
 
 All notable changes to Kamex (formerly Kannel) will be documented in this file.
 
-## [Unreleased]
+## [1.8.5] - 2026-08-05
+
+Fixes mined from the upstream Kannel mailing list archives and Debian's patch
+queue. Upstream trunk has been frozen at r5336 (2024-05-14) since before Kamex
+forked, so none of these would ever have been fixed there.
 
 ### Fixed
 - **SMPP delivery receipts with padded fields were parsed wrong, and reported a
