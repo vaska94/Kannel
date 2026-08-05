@@ -307,6 +307,17 @@ void mysql_save_list(List *qlist, Octstr *momt, int save_mt)
             octstr_destroy(stuffer[--stuffcount]);
         }
     }
+    /*
+     * Nothing consumed means there is nothing to insert or delete. Building
+     * the statements anyway yields "VALUES " and "WHERE sql_id in ()", which
+     * the server rejects with a syntax error on every cycle.
+     */
+    if (octstr_len(ids) == 0) {
+        octstr_destroy(values);
+        octstr_destroy(ids);
+        return;
+    }
+
     if (save_mt) {
         sql = octstr_format(SQLBOX_MYSQL_INSERT_LIST_QUERY, sqlbox_logtable, values);
         octstr_destroy(values);

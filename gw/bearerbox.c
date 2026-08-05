@@ -666,14 +666,23 @@ int main(int argc, char **argv)
         panic(0, "Couldn't read configuration from `%s'.", octstr_get_cstr(cfg_filename));
 
     if (test_config_only) {
+        int ok;
+
         printf("bearerbox: configuration file %s syntax is ok\n", octstr_get_cstr(cfg_filename));
-        printf("bearerbox: configuration file %s test is successful\n", octstr_get_cstr(cfg_filename));
+        /*
+         * Syntax alone is not enough to start on: run the same semantic
+         * checks the real startup path applies, otherwise a config can test
+         * clean here and then panic on boot.
+         */
+        ok = (check_config(cfg) != -1);
+        printf("bearerbox: configuration file %s test %s\n",
+               octstr_get_cstr(cfg_filename), ok ? "is successful" : "failed");
         cfg_destroy(cfg);
         octstr_destroy(cfg_filename);
         gwlist_destroy(suspended, NULL);
         gwlist_destroy(isolated, NULL);
         gwlib_shutdown();
-        return 0;
+        return ok ? 0 : 1;
     }
 
     dlr_init(cfg);

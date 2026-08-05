@@ -2,6 +2,39 @@
 
 All notable changes to Kamex (formerly Kannel) will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- **SQLBox spun forever on a message it could not process, filling the disk.**
+  In list mode, a message failing `charset_processing()` was destroyed before
+  it reached the save list — and the save list is what deletes the row. The row
+  stayed in the queue table, was selected again on the next pass, and since that
+  branch has no sleep, this was a tight loop: measured at ~2,500 log lines per
+  second, with two MySQL syntax errors per cycle (an empty batch produced
+  `VALUES ` and `WHERE sql_id in ()`). Failed messages are now handed to the
+  save list so their row is removed, and an empty batch issues no statements.
+
+  This is the default path: list mode is selected whenever `limit-per-cycle`
+  is above 1, which it is by default (10), and MySQL is the only backend that
+  implements it. A single message containing a literal `%` was enough to
+  trigger it, because `msgdata` is stored URL-encoded.
+- **SQLBox reported the failure without saying what was wrong.** "Could not
+  charset process message, dropping it!" named neither the row nor the reason.
+  It now reports the `sql_id` and receiver, and distinguishes invalid URL
+  encoding (with a hint that a literal `%` must be written `%25`) from a failed
+  charset conversion, naming the charset.
+- **`-t` accepted configurations that then refused to boot.** Config testing
+  stopped after the syntax and field-name pass, so a config missing a group the
+  daemon requires — `smsbox-port` set with no `smsbox` group, for instance —
+  reported "test is successful" and exited 0, then panicked on a real start.
+  Both `bearerbox -t` and `smsbox -t` now apply the same mandatory-group checks
+  the startup path applies, print `test failed`, and exit non-zero, which is
+  what makes them usable in CI. Configurations that were already valid are
+  unaffected.
+- The "DLR not found" warning now includes the SMSC timestamp. Without it the
+  message could not be correlated with a submission at default log level, since
+  only the debug line above it carried the field.
+
 ## [1.8.6] - 2026-08-05
 
 ### Added

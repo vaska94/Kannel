@@ -3089,6 +3089,25 @@ static void signal_handler(int signum) {
 }
 
 
+/*
+ * Groups init_smsbox() cannot start without. Kept side-effect free so that
+ * -t can apply it without opening logs, ports or database connections.
+ */
+static int check_config(Cfg *cfg)
+{
+    if (cfg_get_single_group(cfg, octstr_imm("core")) == NULL) {
+        error(0, "No 'core' group in configuration");
+        return -1;
+    }
+    if (cfg_get_single_group(cfg, octstr_imm("smsbox")) == NULL) {
+        error(0, "No 'smsbox' group in configuration");
+        return -1;
+    }
+
+    return 0;
+}
+
+
 static void setup_signal_handlers(void) {
     struct sigaction act;
 
@@ -3432,12 +3451,17 @@ int main(int argc, char **argv)
 	panic(0, "Couldn't read configuration from `%s'.", octstr_get_cstr(filename));
 
     if (test_config_only) {
+        int ok;
+
         printf("smsbox: configuration file %s syntax is ok\n", octstr_get_cstr(filename));
-        printf("smsbox: configuration file %s test is successful\n", octstr_get_cstr(filename));
+        /* see the matching comment in bearerbox.c: syntax is not enough */
+        ok = (check_config(cfg) != -1);
+        printf("smsbox: configuration file %s test %s\n",
+               octstr_get_cstr(filename), ok ? "is successful" : "failed");
         cfg_destroy(cfg);
         octstr_destroy(filename);
         gwlib_shutdown();
-        return 0;
+        return ok ? 0 : 1;
     }
 
     octstr_destroy(filename);
