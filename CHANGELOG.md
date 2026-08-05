@@ -2,7 +2,7 @@
 
 All notable changes to Kamex (formerly Kannel) will be documented in this file.
 
-## [Unreleased]
+## [1.8.7] - 2026-08-05
 
 ### Fixed
 - **SQLBox spun forever on a message it could not process, filling the disk.**
