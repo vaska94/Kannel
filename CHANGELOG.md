@@ -23,6 +23,14 @@ All notable changes to Kamex (formerly Kannel) will be documented in this file.
   It now reports the `sql_id` and receiver, and distinguishes invalid URL
   encoding (with a hint that a literal `%` must be written `%25`) from a failed
   charset conversion, naming the charset.
+- **`-t` accepted configurations that then refused to boot.** Config testing
+  stopped after the syntax and field-name pass, so a config missing a group the
+  daemon requires — `smsbox-port` set with no `smsbox` group, for instance —
+  reported "test is successful" and exited 0, then panicked on a real start.
+  Both `bearerbox -t` and `smsbox -t` now apply the same mandatory-group checks
+  the startup path applies, print `test failed`, and exit non-zero, which is
+  what makes them usable in CI. Configurations that were already valid are
+  unaffected.
 - The "DLR not found" warning now includes the SMSC timestamp. Without it the
   message could not be correlated with a submission at default log level, since
   only the debug line above it carried the field.
