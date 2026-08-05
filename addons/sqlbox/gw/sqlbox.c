@@ -173,27 +173,38 @@ static int charset_processing(Msg *msg)
     gw_assert(msg->type == sms);
 
     /* URL-decode first */
-    if (octstr_url_decode(msg->sms.msgdata) == -1)
+    if (octstr_url_decode(msg->sms.msgdata) == -1) {
+        error(0, "sqlbox: msgdata is not valid URL encoding (a literal '%%' "
+                 "must be written as '%%25').");
         return -1;
-    if (octstr_url_decode(msg->sms.udhdata) == -1)
+    }
+    if (octstr_url_decode(msg->sms.udhdata) == -1) {
+        error(0, "sqlbox: udhdata is not valid URL encoding.");
         return -1;
-        
+    }
+
     /* If a specific character encoding has been indicated by the
      * user, then make sure we convert to our internal representations. */
     if (octstr_len(msg->sms.charset)) {
-    
+
         if (msg->sms.coding == DC_7BIT) {
             /* For 7 bit, convert to UTF-8 */
-            if (charset_convert(msg->sms.msgdata, octstr_get_cstr(msg->sms.charset), "UTF-8") < 0)
+            if (charset_convert(msg->sms.msgdata, octstr_get_cstr(msg->sms.charset), "UTF-8") < 0) {
+                error(0, "sqlbox: cannot convert msgdata from <%s> to UTF-8.",
+                      octstr_get_cstr(msg->sms.charset));
                 return -1;
-        } 
+            }
+        }
         else if (msg->sms.coding == DC_UCS2) {
             /* For UCS-2, convert to UTF-16BE */
-            if (charset_convert(msg->sms.msgdata, octstr_get_cstr(msg->sms.charset), "UTF-16BE") < 0) 
+            if (charset_convert(msg->sms.msgdata, octstr_get_cstr(msg->sms.charset), "UTF-16BE") < 0) {
+                error(0, "sqlbox: cannot convert msgdata from <%s> to UTF-16BE.",
+                      octstr_get_cstr(msg->sms.charset));
                 return -1;
+            }
         }
     }
-    
+
     return 0;
 }
 
@@ -626,8 +637,17 @@ static void sql_list(Boxc *boxc)
 	if ( gw_sql_fetch_msg_list(qlist, limit_per_cycle) > 0 ) {
 	    while((gwlist_len(qlist)>0) && ((msg = gwlist_consume(qlist)) != NULL )) {
                 if (charset_processing(msg) == -1) {
-                    error(0, "Could not charset process message, dropping it!");
-                    msg_destroy(msg);
+                    error(0, "sqlbox: could not charset process message sql_id <%s> "
+                             "to <%s>, dropping it!",
+                          octstr_get_cstr(msg->sms.foreign_id),
+                          octstr_get_cstr(msg->sms.receiver));
+                    /*
+                     * Hand it to save_list anyway: that is what deletes the row.
+                     * Dropping it here instead leaves the row in the queue table
+                     * to be selected again on every following pass, and this
+                     * branch does not sleep, so one bad message spins forever.
+                     */
+                    gwlist_produce(save_list, msg);
                     continue;
                 }
                 if (global_sender != NULL && (msg->sms.sender == NULL || octstr_len(msg->sms.sender) == 0)) {

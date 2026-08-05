@@ -410,8 +410,9 @@ Msg *dlr_find(const Octstr *smsc, const Octstr *ts, const Octstr *dst, int typ, 
 
     dlr = handles->dlr_get(smsc, ts, dst_min);
     if (dlr == NULL)  {
-        warning(0, "DLR[%s]: DLR from SMSC<%s> for DST<%s> not found.",
-                dlr_type(), octstr_get_cstr(smsc), octstr_get_cstr(dst));         
+        warning(0, "DLR[%s]: DLR from SMSC<%s> for DST<%s> with ts<%s> not found.",
+                dlr_type(), octstr_get_cstr(smsc), octstr_get_cstr(dst),
+                octstr_get_cstr(ts));
         return NULL;
     }
 
