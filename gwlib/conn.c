@@ -82,12 +82,24 @@
 #include "gwlib/gwlib.h"
 
 #ifdef HAVE_LIBSSL
+#include <arpa/inet.h>
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 #include <openssl/conf.h>
 
 static SSL_CTX *global_ssl_context = NULL;
 static SSL_CTX *global_server_ssl_context = NULL;
+
+/*
+ * Whether outbound TLS connections must present a certificate that matches
+ * the host we asked for. Off by default: existing deployments routinely talk
+ * to SMSCs with self-signed or name-mismatched certificates, and silently
+ * refusing to connect to them on upgrade would be worse than the status quo.
+ */
+static int global_ssl_verify_host = 0;
+
+/* Whether an explicit CA bundle was configured via ssl-trusted-ca-file. */
+static int global_ssl_have_ca = 0;
 #endif /* HAVE_LIBSSL */
 
 /*
@@ -407,7 +419,51 @@ static void unlocked_register_pollout(Connection *conn, int onoff)
 }
 
 #ifdef HAVE_LIBSSL
-static int conn_init_client_ssl(Connection *ret, Octstr *certkeyfile)
+/*
+ * Tell OpenSSL which host we believe we are talking to, so that it can send
+ * SNI (required by any server sharing an address between names) and, when
+ * ssl-verify-host is on, refuse a certificate issued for someone else.
+ *
+ * host may be a name or a literal address; the two need different treatment.
+ */
+static int conn_set_ssl_peer_name(SSL *ssl, Octstr *host)
+{
+    const char *name;
+    unsigned char addr[sizeof(struct in6_addr)];
+    int is_literal;
+
+    if (host == NULL || octstr_len(host) == 0)
+        return 0;
+
+    name = octstr_get_cstr(host);
+    is_literal = (inet_pton(AF_INET, name, addr) == 1 ||
+                  inet_pton(AF_INET6, name, addr) == 1);
+
+    /* RFC 6066 forbids literal addresses in SNI, so only send it for names. */
+    if (!is_literal && SSL_set_tlsext_host_name(ssl, name) != 1) {
+        warning(0, "SSL: could not set SNI host name <%s>, continuing without it.",
+                name);
+    }
+
+    if (!global_ssl_verify_host)
+        return 0;
+
+    if (is_literal
+        ? X509_VERIFY_PARAM_set1_ip_asc(SSL_get0_param(ssl), name) != 1
+        : SSL_set1_host(ssl, name) != 1) {
+        /*
+         * Fail closed: proceeding here would hand back a connection the
+         * caller believes is verified when it is not.
+         */
+        error(0, "SSL: could not require certificate to match <%s>.", name);
+        return -1;
+    }
+
+    return 0;
+}
+
+
+static int conn_init_client_ssl(Connection *ret, Octstr *certkeyfile, Octstr *host)
 {
     ret->ssl = SSL_new(global_ssl_context);
 
@@ -417,6 +473,9 @@ static int conn_init_client_ssl(Connection *ret, Octstr *certkeyfile)
      * will not work reliably.
      */
     ERR_clear_error();
+
+    if (conn_set_ssl_peer_name(ret->ssl, host) == -1)
+        return -1;
 
     if (certkeyfile != NULL) {
         SSL_use_certificate_file(ret->ssl, octstr_get_cstr(certkeyfile),
@@ -462,7 +521,7 @@ Connection *conn_open_ssl_nb(Octstr *host, int port, Octstr *certkeyfile,
         return NULL;
     }
     
-    if (conn_init_client_ssl(ret, certkeyfile) == -1) {
+    if (conn_init_client_ssl(ret, certkeyfile, host) == -1) {
         conn_destroy(ret);
         return NULL;
     }
@@ -480,7 +539,7 @@ Connection *conn_open_ssl(Octstr *host, int port, Octstr *certkeyfile,
         return NULL;
     }
 
-    if (conn_init_client_ssl(ret, certkeyfile) == -1) {
+    if (conn_init_client_ssl(ret, certkeyfile, host) == -1) {
         conn_destroy(ret);
         return NULL;
     }
@@ -1394,16 +1453,42 @@ void conn_use_global_trusted_ca_file(Octstr *ssl_trusted_ca_file)
         } else {
             info(0, "Using CA root certificates from file %s",
                     octstr_get_cstr(ssl_trusted_ca_file));
+            global_ssl_have_ca = 1;
             SSL_CTX_set_verify(global_ssl_context,
                     SSL_VERIFY_PEER,
                     verify_callback);
         }
 
     } else {
+        global_ssl_have_ca = 0;
         SSL_CTX_set_verify(global_ssl_context,
                 SSL_VERIFY_NONE,
                 NULL);
     }
+}
+
+
+void conn_use_global_verify_host(int verify)
+{
+    global_ssl_verify_host = verify;
+
+    if (!verify)
+        return;
+
+    /*
+     * Matching the name is pointless unless the chain is checked as well,
+     * so turn peer verification on here rather than making the operator
+     * remember to set two directives. Without an explicit CA bundle, fall
+     * back to the system trust store.
+     */
+    if (!global_ssl_have_ca) {
+        if (!SSL_CTX_set_default_verify_paths(global_ssl_context))
+            panic(0, "ssl-verify-host is set but no CA certificates are "
+                     "available; set ssl-trusted-ca-file.");
+        info(0, "Verifying outbound TLS against the system CA store.");
+    }
+
+    SSL_CTX_set_verify(global_ssl_context, SSL_VERIFY_PEER, verify_callback);
 }
 
 void conn_config_ssl (CfgGroup *grp)
@@ -1414,6 +1499,7 @@ void conn_config_ssl (CfgGroup *grp)
     Octstr *ssl_trusted_ca_file = NULL;
     Octstr *ssl_client_cipher_list = NULL;
     Octstr *ssl_server_cipher_list = NULL;
+    int ssl_verify_host = 0;
 
     /*
      * check if SSL is desired for HTTP servers and then
@@ -1433,8 +1519,12 @@ void conn_config_ssl (CfgGroup *grp)
     }
 
     ssl_trusted_ca_file = cfg_get(grp, octstr_imm("ssl-trusted-ca-file"));
-    
+
     conn_use_global_trusted_ca_file(ssl_trusted_ca_file);
+
+    /* Must follow the CA setup above, which it builds on. */
+    cfg_get_bool(&ssl_verify_host, grp, octstr_imm("ssl-verify-host"));
+    conn_use_global_verify_host(ssl_verify_host);
 
     /*
      * Check if specific ciphers are selected/de-selected.

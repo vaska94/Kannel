@@ -65,12 +65,41 @@ store-file = /var/lib/kannel/kannel.store
 # Or use Redis/database storage
 store-type = redis
 
-# SSL/TLS for admin interface
-ssl-certkey-file = /etc/kannel/kannel.pem
+# SSL/TLS for incoming connections (admin port, sendsms port)
+ssl-server-cert-file = /etc/kamex/cert.pem
+ssl-server-key-file = /etc/kamex/key.pem
+
+# SSL/TLS for outgoing connections (SMPP over TLS, dlr-url, sms-service)
+ssl-trusted-ca-file = /etc/ssl/certs/ca-bundle.crt
+ssl-verify-host = true
 
 # Unified prefix normalization
 unified-prefix = "00358,+"       # Convert +358... and 0... to 00358...
 ```
+
+### Verifying outbound TLS
+
+By default Kamex does **not** verify the certificate presented by a server it
+connects to, so an attacker able to intercept the connection can present any
+certificate and read or modify the traffic. This affects SMPP over TLS,
+`dlr-url` callbacks, `sms-service` fetches and the HTTP SMSC drivers.
+
+Set `ssl-verify-host = true` to require that the peer's certificate is issued by
+a trusted CA *and* was issued for the host you configured. When it is set:
+
+- if `ssl-trusted-ca-file` is given, that bundle is the trust anchor;
+- otherwise the system CA store is used, and Kamex refuses to start if none
+  is available.
+
+Connections made to a literal IP address are matched against the certificate's
+IP SAN entries, which most certificates do not carry — if you connect to your
+SMSC by address rather than by name, keep verification off or ask the operator
+for a certificate with the right SAN.
+
+This defaults to `false` because turning it on can stop an existing gateway
+from connecting to an SMSC whose certificate is self-signed or issued for a
+different name. Enabling it is strongly recommended, and it is worth testing on
+a non-production bearerbox first.
 
 ### Core Directives Reference
 
@@ -86,6 +115,11 @@ unified-prefix = "00358,+"       # Convert +358... and 0... to 00358...
 | `store-file` | path | Message store file |
 | `store-type` | string | `file`, `redis`, `mysql`, etc. |
 | `unified-prefix` | string | Number normalization rules |
+| `ssl-server-cert-file` | path | Certificate presented on TLS-enabled listen ports |
+| `ssl-server-key-file` | path | Private key for the above |
+| `ssl-trusted-ca-file` | path | CA bundle used to verify servers Kamex connects to |
+| `ssl-verify-host` | bool | Require outbound TLS certificates to match the host (default `false`) |
+| `ssl-client-certkey-file` | path | Client certificate + key for outbound TLS |
 
 ## SMSBox Group
 
