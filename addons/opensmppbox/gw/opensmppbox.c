@@ -1854,7 +1854,7 @@ static Boxc *accept_smpp(int fd, int ssl)
     Octstr *ip;
 
     int newfd;
-    struct sockaddr_in client_addr;
+    struct sockaddr_storage client_addr;
     socklen_t client_addr_len;
 
     client_addr_len = sizeof(client_addr);
@@ -1863,7 +1863,7 @@ static Boxc *accept_smpp(int fd, int ssl)
     if (newfd < 0)
         return NULL;
 
-    ip = host_ip(client_addr);
+    ip = gw_sockaddr_to_octstr((struct sockaddr *) &client_addr);
 
     newconn = boxc_create(newfd, ip, 0);
 
@@ -2450,6 +2450,11 @@ static void init_smppbox(Cfg *cfg)
 	/* init storage store */
 	grp= cfg_get_single_group(cfg, octstr_imm("core"));
 	if (grp != NULL) {
+		/* IPv6 is opt-in; read before any socket is created. */
+		int use_ipv6 = 0;
+		cfg_get_bool(&use_ipv6, grp, octstr_imm("ipv6"));
+		socket_enable_ipv6(use_ipv6);
+
 		log = cfg_get(grp, octstr_imm("store-file"));
 		if (log != NULL) {
 			warning(0, "'store-file' option deprecated, please use 'store-location' and 'store-type' instead.");

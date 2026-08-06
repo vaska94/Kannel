@@ -603,7 +603,7 @@ static Boxc *accept_boxc(int fd, int ssl)
     Octstr *ip;
 
     int newfd;
-    struct sockaddr_in client_addr;
+    struct sockaddr_storage client_addr;
     socklen_t client_addr_len;
 
     client_addr_len = sizeof(client_addr);
@@ -612,7 +612,7 @@ static Boxc *accept_boxc(int fd, int ssl)
     if (newfd < 0)
         return NULL;
 
-    ip = host_ip(client_addr);
+    ip = gw_sockaddr_to_octstr((struct sockaddr *) &client_addr);
 
     if (is_allowed_ip(box_allow_ip, box_deny_ip, ip) == 0) {
         info(0, "Box connection tried from denied host <%s>, disconnected",

@@ -938,6 +938,29 @@ static Octstr *get_redirection_location(HTTPServer *trans)
  * user/passwd (if any), host and port string and prepend it
  * to the location URI.
  */
+Octstr *http_host_for_url(Octstr *host)
+{
+    if (host == NULL)
+        return NULL;
+
+    /*
+     * An IPv6 literal has to be bracketed wherever it appears inside a URL or a
+     * Host: header (RFC 3986 sec. 3.2.2, RFC 7230 sec. 5.4). We keep the host
+     * unbracketed internally because that is what getaddrinfo() wants, so the
+     * brackets have to be put back on the way out - otherwise we emit
+     * `Host: ::1:8080', which strict servers and proxies reject or mis-route.
+     *
+     * Detection is by ':' : it cannot occur in a hostname or an IPv4 address,
+     * and an already-bracketed value is left alone.
+     */
+    if (octstr_search_char(host, ':', 0) == -1 ||
+        octstr_get_char(host, 0) == '[')
+        return octstr_duplicate(host);
+
+    return octstr_format("[%S]", host);
+}
+
+
 static void recover_absolute_uri(HTTPServer *trans, Octstr *loc)
 {
     Octstr *os;
@@ -959,8 +982,12 @@ static void recover_absolute_uri(HTTPServer *trans, Octstr *loc)
             octstr_append_char(os, '@');
         }
         
-        /* host */
-        octstr_append(os, trans->host);
+        /* host, re-bracketed if it is an IPv6 literal */
+        {
+            Octstr *h = http_host_for_url(trans->host);
+            octstr_append(os, h);
+            octstr_destroy(h);
+        }
         
         /* port, only added if literally not default. */
         if (trans->port != 80 || trans->ssl) {
@@ -1265,7 +1292,11 @@ static Octstr *build_request(char *method_name, Octstr *path_or_url,
     }
 
     if (!host_found) {
-        octstr_format_append(request, "Host: %S", host);
+        {
+            Octstr *h = http_host_for_url(host);
+            octstr_format_append(request, "Host: %S", h);
+            octstr_destroy(h);
+        }
         /*
          * In accordance with HTT/1.1 [RFC 2616], section 14.23 "Host"
          * we shall ONLY add the port number if it is not one of the
@@ -1380,6 +1411,7 @@ HTTPURLParse *parse_url(Octstr *url)
     Octstr *prefix, *prefix_https;
     long prefix_len;
     int host_len, colon, slash, at, auth_sep, query;
+    long v6_end;
     host_len = colon = slash = at = auth_sep = query = 0;
 
     prefix = octstr_imm("http://");
@@ -1411,10 +1443,52 @@ HTTPURLParse *parse_url(Octstr *url)
         return NULL;
     }
 
+    /*
+     * An IPv6 literal is bracketed (RFC 3986), e.g. http://[::1]:8080/path.
+     * The colons inside the brackets belong to the address, so the port
+     * separator must be looked for after the closing bracket - otherwise the
+     * address itself is taken for a port and the URL is rejected as having a
+     * "malformed port number".
+     */
+    v6_end = -1;
+    if (octstr_get_char(url, prefix_len) == '[') {
+        long path_start = octstr_search_char(url, '/', prefix_len);
+        int after;
+
+        v6_end = octstr_search_char(url, ']', prefix_len);
+        /*
+         * The closing bracket has to come before the path, otherwise a URL such
+         * as http://[::1/foo]bar would take a ']' from inside the path and hand
+         * the garbage in between to getaddrinfo().
+         */
+        if (path_start != -1 && v6_end > path_start)
+            v6_end = -1;
+        if (v6_end == -1 || v6_end == prefix_len + 1) {
+            error(0, "URL <%s> has a malformed IPv6 literal.",
+                  octstr_get_cstr(url));
+            return NULL;
+        }
+        /*
+         * Whatever follows the literal has to begin a port, a path, a query or
+         * a fragment; nothing else belongs to the authority. Without this,
+         * http://[::1]extra/foo parses with a host of "[::1]extra", and
+         * http://[::1?foo]bar with a host of "[::1", which then goes out in an
+         * unbalanced Host: header. Both are rejected without the brackets, and
+         * accepting a bracketed literal must not be the looser path.
+         */
+        after = octstr_get_char(url, v6_end + 1);
+        if (after != -1 && after != ':' && after != '/' && after != '?' &&
+            after != '#') {
+            error(0, "URL <%s> has trailing garbage after the IPv6 literal.",
+                  octstr_get_cstr(url));
+            return NULL;
+        }
+    }
+
     /* check if colon and slashes are within scheme */
-    colon = octstr_search_char(url, ':', prefix_len);
-    slash = octstr_search_char(url, '/', prefix_len);
-    if (colon == prefix_len || slash == prefix_len) {
+    colon = octstr_search_char(url, ':', v6_end == -1 ? prefix_len : v6_end + 1);
+    slash = octstr_search_char(url, '/', v6_end == -1 ? prefix_len : v6_end + 1);
+    if (v6_end == -1 && (colon == prefix_len || slash == prefix_len)) {
         error(0, "URL <%s> is malformed.", octstr_get_cstr(url));
         return NULL;
     }
@@ -1528,8 +1602,29 @@ HTTPURLParse *parse_url(Octstr *url)
             octstr_copy(url, slash, query - slash) :
             octstr_copy(url, slash, octstr_len(url) - slash)); 
 
+    /*
+     * The host can never extend past the closing bracket of an IPv6 literal.
+     * The port and path searches already start after it, so this is a backstop
+     * against a future path through the length arithmetic above rather than a
+     * live correction.
+     */
+    if (v6_end != -1 && prefix_len + host_len > v6_end + 1)
+        host_len = v6_end + 1 - prefix_len;
+
     /* hostname */
-    p->host = octstr_copy(url, prefix_len, host_len); 
+    p->host = octstr_copy(url, prefix_len, host_len);
+
+    /*
+     * Strip the brackets from an IPv6 literal: getaddrinfo() wants the bare
+     * address. Anything that emits the host again - a Host: header, a rebuilt
+     * URL - must put them back with http_host_for_url().
+     */
+    if (octstr_len(p->host) > 1 && octstr_get_char(p->host, 0) == '[' &&
+        octstr_get_char(p->host, octstr_len(p->host) - 1) == ']') {
+        Octstr *bare = octstr_copy(p->host, 1, octstr_len(p->host) - 2);
+        octstr_destroy(p->host);
+        p->host = bare;
+    }
 
     /* XXX add fragment too */
    
@@ -2346,7 +2441,7 @@ static void server_thread(void *dummy)
     struct pollfd *tab = NULL;
     struct port **ports = NULL;
     int tab_size = 0, n, i, fd, ret, max_clients_reached;
-    struct sockaddr_in addr;
+    struct sockaddr_storage addr;
     socklen_t addrlen;
     HTTPClient *client;
     Connection *conn;
@@ -2403,7 +2498,7 @@ static void server_thread(void *dummy)
                 if (fd == -1) {
                     error(errno, "HTTP: Error accepting a client.");
                 } else {
-                    Octstr *client_ip = host_ip(addr);
+                    Octstr *client_ip = gw_sockaddr_to_octstr((struct sockaddr *) &addr);
                     /*
                      * Be aware that conn_wrap_fd() will return NULL if SSL 
                      * handshake has failed, so we only client_create() if

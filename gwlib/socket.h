@@ -85,6 +85,25 @@ Octstr *get_official_name(void);
    */
 Octstr *get_official_ip(void);
 
+/*
+ * Enable or disable use of IPv6. Disabled by default, so an existing
+ * IPv4-only deployment keeps exactly its previous behaviour until the
+ * `ipv6' core-group setting is turned on. Call this once at startup, after
+ * the core group has been read and before any socket is created.
+ *
+ * When disabled: the wildcard listener binds AF_INET, and outbound
+ * resolution asks for AF_INET only. Everything else in this header behaves
+ * the same either way.
+ */
+void socket_enable_ipv6(int enable);
+
+/*
+ * Whether socket_enable_ipv6() has turned IPv6 on. Access control consults
+ * this so that the dual-stack ACL rules apply only when dual-stack listeners
+ * actually exist; with IPv6 off, matching stays exactly as it was.
+ */
+int socket_ipv6_enabled(void);
+
 /* Open a server socket. Return -1 for error, >= 0 socket number for OK.*/
 int make_server_socket(int port, const char *source_addr);
 
@@ -168,6 +187,24 @@ int udp_sendto(int s, Octstr *datagram, Octstr *addr);
 int udp_recvfrom_flags(int s, Octstr **datagram, Octstr **addr, int sockrcvflags);
 int udp_recvfrom(int s, Octstr **datagram, Octstr **addr);
 
+
+/*
+ * Format the address part of any sockaddr as a string. Handles AF_INET and
+ * AF_INET6, and renders IPv4-mapped IPv6 addresses as plain IPv4 so that
+ * IPv4 peers arriving on a dual-stack listener keep their familiar form.
+ * Never returns NULL - an address family it cannot describe yields a
+ * placeholder, because the result is stored on connection objects and logged
+ * widely, where a NULL would surface far from the call site.
+ *
+ * Prefer this over host_ip(), which is limited to IPv4 by its signature.
+ */
+Octstr *gw_sockaddr_to_octstr(const struct sockaddr *sa);
+
+/*
+ * Port from any sockaddr, in host byte order, or -1 for unknown families.
+ * Prefer this over host_port().
+ */
+int gw_sockaddr_port(const struct sockaddr *sa);
 
 /*
  * Create an Octstr of character representation of an IP

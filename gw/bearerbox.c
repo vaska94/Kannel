@@ -355,6 +355,16 @@ static Cfg *init_bearerbox(Cfg *cfg)
 	
     grp = cfg_get_single_group(cfg, octstr_imm("core"));
 
+    /*
+     * IPv6 is opt-in: read it before any socket is created, so that with the
+     * setting absent this build behaves exactly like an IPv4-only one.
+     */
+    {
+        int use_ipv6 = 0;
+        cfg_get_bool(&use_ipv6, grp, octstr_imm("ipv6"));
+        socket_enable_ipv6(use_ipv6);
+    }
+
     log = cfg_get(grp, octstr_imm("log-file"));
     if (log != NULL) {
         if (cfg_get_integer(&loglevel, grp, octstr_imm("log-level")) == -1)

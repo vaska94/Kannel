@@ -10,7 +10,9 @@ noinst_PROGRAMS = \
 	check_ipcheck \
 	check_json \
 	check_list \
-	check_octstr
+	check_octstr \
+	check_sockaddr \
+	check_url
 
 dist_noinst_SCRIPTS = \
 	check_fakesmsc.sh \

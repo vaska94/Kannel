@@ -250,7 +250,15 @@ typedef struct {
     Octstr *fragment;
 } HTTPURLParse;
 
-/* 
+/*
+ * Render a host for inclusion in a URL or a Host: header. Hosts are kept
+ * unbracketed internally because getaddrinfo() requires that, so an IPv6
+ * literal has to be re-bracketed on the way out. Returns a new Octstr the
+ * caller destroys; NULL in, NULL out.
+ */
+Octstr *http_host_for_url(Octstr *host);
+
+/*
  * Create an URL parsing structure.
  */
 HTTPURLParse *http_urlparse_create(void);

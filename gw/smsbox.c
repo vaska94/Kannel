@@ -3153,7 +3153,17 @@ static Cfg *init_smsbox(Cfg *cfg)
      */
 
     grp = cfg_get_single_group(cfg, octstr_imm("core"));
-    
+
+    /*
+     * IPv6 is opt-in: read it before any socket is created, so that with the
+     * setting absent this build behaves exactly like an IPv4-only one.
+     */
+    {
+        int use_ipv6 = 0;
+        cfg_get_bool(&use_ipv6, grp, octstr_imm("ipv6"));
+        socket_enable_ipv6(use_ipv6);
+    }
+
     cfg_get_integer(&bb_port, grp, octstr_imm("smsbox-port"));
 #ifdef HAVE_LIBSSL
     cfg_get_bool(&bb_ssl, grp, octstr_imm("smsbox-port-ssl"));

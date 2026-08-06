@@ -98,6 +98,8 @@ checks/check_ipcheck
 checks/check_json
 checks/check_list
 checks/check_octstr
+checks/check_sockaddr
+checks/check_url
 
 # Backup and temporary files
 *~

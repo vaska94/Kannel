@@ -414,7 +414,7 @@ static void accept_thread(void *arg)
     int new_fd;
     int port;
     socklen_t addrlen;
-    struct sockaddr addr;
+    struct sockaddr_storage addr;   /* not sockaddr: an IPv6 peer would be truncated */
     long smsbox_thread_id;
     
     port = *(int *) arg;
@@ -427,7 +427,7 @@ static void accept_thread(void *arg)
 	if (gwthread_pollfd(fd, POLLIN, -1.0) != POLLIN)
 	    break;
 	addrlen = sizeof(addr);
-	new_fd = accept(fd, &addr, &addrlen);
+	new_fd = accept(fd, (struct sockaddr *) &addr, &addrlen);
     	if (start_time == (time_t) -1)
 	    time(&start_time);
 	gwthread_create(receive_smpp_thread, 
