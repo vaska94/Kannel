@@ -2,7 +2,7 @@
 
 All notable changes to Kamex (formerly Kannel) will be documented in this file.
 
-## [Unreleased]
+## [1.8.8] - 2026-08-06
 
 ### Added
 - **IPv6 support, opt-in via `ipv6 = true` in the `core` group.** Off by default,

@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 
 Name:           kamex-sqlbox
-Version:        1.8.7
+Version:        1.8.8
 Release:        1%{?dist}
 Summary:        Database queue box for Kamex SMS gateway
 License:        MIT and Kannel
