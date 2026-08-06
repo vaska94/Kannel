@@ -2,7 +2,7 @@
 
 All notable changes to Kamex (formerly Kannel) will be documented in this file.
 
-## [Unreleased]
+## [1.8.9] - 2026-08-06
 
 ### Fixed
 - **IP access rules with fewer than four parts silently matched nothing.** A
