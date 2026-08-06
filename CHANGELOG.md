@@ -2,6 +2,36 @@
 
 All notable changes to Kamex (formerly Kannel) will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- **IP access rules with fewer than four parts silently matched nothing.** A
+  trailing wildcard advanced only as far as the next dot and then required the
+  address to be exhausted, so any pattern that did not have exactly four
+  dot-separated components matched no IPv4 address at all — and said nothing
+  about it. `box-deny-ip = "192.168.*"` denied no one, `admin-deny-ip = "10.*"`
+  denied no one, and a deny list of `"*"` denied no one. In the deny direction
+  this failed **open**: a rule written to lock an interface down had no effect,
+  with nothing logged and a configuration that parsed cleanly. A trailing
+  wildcard now covers the rest of the address, so these patterns match what
+  they look like they match. (#5)
+
+  **This changes what some existing configurations do.** A rule that already
+  matched is unaffected — the change only widens a wildcard that previously had
+  to land exactly on the end of the address, so nothing that was being denied
+  stops being denied. But a rule that was inert now takes effect:
+
+  - in a **deny** list it starts denying the addresses it names, which is what
+    it was written to do;
+  - in an **allow** list it starts admitting them. An allow entry that matched
+    nothing was previously refusing the very peers it was meant to permit, so a
+    working deployment is unlikely to depend on one — but check any
+    `*-allow-ip` with fewer than four parts before upgrading.
+
+  Wildcards that are not trailing are unchanged and still cover a single
+  component, so `10.*.0.5` continues to match `10.9.0.5` and not `10.9.9.0.5`.
+  Exact patterns are unchanged: `127.0.0.1` still does not match `127.0.0.10`.
+
 ## [1.8.8] - 2026-08-06
 
 ### Added

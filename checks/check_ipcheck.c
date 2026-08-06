@@ -88,12 +88,25 @@ int main(void)
 	 * With IPv6 off, matching must be exactly what it always was. These pin
 	 * the two rules added below to the enabled case only, so that turning the
 	 * feature off cannot change what an existing configuration means.
-	 * A bare "*" has never matched a dotted quad - the matcher advances a
-	 * wildcard only to the next dot - so a deny list of "*" still denies
-	 * nobody here, however surprising that is on its own.
+	 * A trailing wildcard covers the rest of the address in both modes, so
+	 * "*" denies every peer regardless of the setting.
 	 */
-	{ 0, "", "*", "10.0.0.5", 1 },
-	{ 0, "127.0.0.1", "*", "10.0.0.5", 1 },
+	{ 0, "", "*", "10.0.0.5", 0 },
+	{ 0, "127.0.0.1", "*", "10.0.0.5", 0 },
+	/*
+	 * A trailing wildcard spans dots, so a pattern with fewer than four parts
+	 * covers the addresses it looks like it covers. Before this it matched
+	 * nothing at all, which made "192.168.*" a deny rule that denied no one.
+	 */
+	{ 0, "", "192.168.*", "192.168.1.5", 0 },
+	{ 0, "", "192.168.*", "10.0.0.5", 1 },
+	{ 0, "", "10.*", "10.0.0.5", 0 },
+	{ 0, "", "10.*", "100.0.0.5", 1 },
+	{ 0, "192.168.*", "*.*.*.*", "192.168.1.5", 1 },
+	{ 0, "192.168.*", "*.*.*.*", "8.8.8.8", 0 },
+	/* A wildcard that is not trailing still covers a single component only. */
+	{ 0, "", "10.*.0.5", "10.9.0.5", 0 },
+	{ 0, "", "10.*.0.5", "10.9.9.0.5", 1 },
 	{ 0, "::1", "*.*.*.*", "127.0.0.9", 0 },
 	/*
 	 * Unreachable in practice - with IPv6 off no listener accepts an IPv6
@@ -118,28 +131,30 @@ int main(void)
 	 * up to the next dot, so "*" matches an address with no dots - every IPv6
 	 * address - and matches no dotted quad.
 	 *
-	 * The consequence for a deny list is a pre-existing wart, pinned here
-	 * rather than fixed, because correcting it would change IPv4 behaviour and
-	 * belongs in its own change.
+	 * A bare "*" is trailing, so it also covers every IPv4 address; the two
+	 * forms differ only in that "*.*.*.*" needs the universal rule to reach an
+	 * IPv6 peer, having four parts to match against an address with no dots.
 	 */
 	{ 1, "", "*", "2600:1f16::99", 0 },
-	{ 1, "", "*", "10.0.0.5", 1 },
+	{ 1, "", "*", "10.0.0.5", 0 },
 	/*
-	 * And the reason it must stay non-universal: as an allow-list entry it
-	 * would otherwise admit an IPv4 peer that the deny list names explicitly,
-	 * purely because IPv6 was switched on.
+	 * As an allow-list entry "*" admits everything, in both modes - it says
+	 * "any address" and now behaves that way, rather than depending on the
+	 * setting.
 	 */
-	{ 0, "*", "1.2.3.4", "1.2.3.4", 0 },
-	{ 1, "*", "1.2.3.4", "1.2.3.4", 0 },
-	{ 1, "127.0.0.1", "*", "10.0.0.5", 1 },
+	{ 0, "*", "1.2.3.4", "1.2.3.4", 1 },
+	{ 1, "*", "1.2.3.4", "1.2.3.4", 1 },
+	{ 1, "127.0.0.1", "*", "10.0.0.5", 0 },
 	/*
-	 * "*.*.*.*" carries no such risk - it already glob-matches every dotted
-	 * quad - so it is the one form treated as universal.
-	 * A partial wildcard matches no real address, just as before, so it must
-	 * not become allow-all either.
+	 * Every one of these ends in a wildcard, which now covers the rest of the
+	 * address, so they all describe 1.2.3.4 and admit it. "*." is the odd one:
+	 * its wildcard is not trailing, so it still consumes a single component
+	 * and then needs a literal dot at the end of the address, which no address
+	 * has.
 	 */
-	{ 1, "*.*", "*.*.*.*", "1.2.3.4", 0 },
-	{ 1, "*.*.*", "*.*.*.*", "1.2.3.4", 0 },
+	{ 1, "*.*", "*.*.*.*", "1.2.3.4", 1 },
+	{ 1, "*.*.*", "*.*.*.*", "1.2.3.4", 1 },
+	{ 0, "*.*", "*.*.*.*", "1.2.3.4", 1 },
 	{ 1, "*.", "*.*.*.*", "1.2.3.4", 0 },
 	/*
 	 * A loopback rule in one family covers the other family's loopback: a

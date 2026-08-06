@@ -865,6 +865,20 @@ glob:
 	} else {
 	    /* We found a wildcard in the pattern. Skip in ip. */
 	    ++i;
+	    if (i >= pat_len) {
+		/*
+		 * Trailing wildcard: let it cover everything that is left,
+		 * dots included. Without this it consumed a single component
+		 * and then required the address to be exhausted, so every
+		 * pattern with fewer than four parts silently matched nothing
+		 * - "192.168.*" denied no one, and a deny list of "*" was
+		 * inert. Rules that already matched are unaffected: this only
+		 * widens a wildcard that previously had to land exactly on the
+		 * end of the address.
+		 */
+		j = ip_len;
+		break;
+	    }
 	    while (j < ip_len && ip_c != '.') {
 		++j;
 		ip_c = octstr_get_char(ip, j);
