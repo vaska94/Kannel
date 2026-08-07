@@ -7,7 +7,6 @@ FROM alpine:3.23 AS builder
 # For reproducible builds, pass SOURCE_DATE_EPOCH:
 #   docker build --build-arg SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) .
 ARG SOURCE_DATE_EPOCH
-ENV SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH}
 
 RUN apk add --no-cache \
     build-base autoconf automake libtool git gettext-dev \
@@ -16,7 +15,16 @@ RUN apk add --no-cache \
 WORKDIR /build
 COPY . .
 
-RUN autoreconf -fi && \
+# Normalize line endings of build inputs so a Windows (CRLF) checkout builds:
+# VERSION is embedded into C string defines, and CRLF in autotools inputs
+# (configure.ac/*.am/*.m4/*.in) produces malformed config file entries.
+RUN find . -type f \( -name 'VERSION' -o -name '*.ac' -o -name '*.am' \
+        -o -name '*.m4' -o -name '*.in' \) -exec sed -i 's/\r$//' {} +
+
+# Only export SOURCE_DATE_EPOCH when a valid value was supplied; an empty
+# value makes GCC abort ("must expand to a non-negative integer").
+RUN if [ -n "$SOURCE_DATE_EPOCH" ]; then export SOURCE_DATE_EPOCH; else unset SOURCE_DATE_EPOCH; fi && \
+    autoreconf -fi && \
     ./configure \
         --prefix=/usr \
         --sysconfdir=/etc/kamex \
@@ -49,8 +57,8 @@ COPY --from=builder /install/usr/sbin/smsbox /usr/sbin/
 COPY --from=builder /install/usr/lib/libgwlib.so* /usr/lib/
 COPY --from=builder /install/usr/lib/libgw.so* /usr/lib/
 
-RUN mkdir -p /var/log/kamex /var/spool/kamex /var/run/kamex /etc/kamex && \
-    chown -R kamex:kamex /var/log/kamex /var/spool/kamex /var/run/kamex
+RUN mkdir -p /var/log/kamex /var/spool/kamex /var/run/kamex /etc/kamex/smsc.d && \
+    chown -R kamex:kamex /var/log/kamex /var/spool/kamex /var/run/kamex /etc/kamex/smsc.d
 
 USER kamex
 EXPOSE 13000 13013

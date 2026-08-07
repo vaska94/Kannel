@@ -1183,6 +1183,41 @@ Octstr *boxc_status(int status_type)
 }
 
 
+/*
+ * Return the base sendsms URL ("http[s]://ip:port") of a connected smsbox that
+ * advertised its sendsms-port, so the admin panel can send test messages via a
+ * same-origin proxy in bearerbox instead of reaching the smsbox directly.
+ * If boxc_id is given and non-empty, match that smsbox; otherwise use the first
+ * live one. Caller must destroy the result; NULL if none is available.
+ */
+Octstr *boxc_sendsms_url(Octstr *boxc_id)
+{
+    Octstr *url = NULL;
+    int i, ssl = 0;
+    Boxc *bi;
+
+    if (smsbox_list == NULL)
+        return NULL;
+
+    gw_rwlock_rdlock(smsbox_list_rwlock);
+    for (i = 0; i < gwlist_len(smsbox_list); i++) {
+        bi = gwlist_get(smsbox_list, i);
+        if (bi->alive == 0 || bi->http_port <= 0)
+            continue;
+        if (boxc_id != NULL && octstr_len(boxc_id) > 0 &&
+            (bi->boxc_id == NULL || octstr_compare(bi->boxc_id, boxc_id) != 0))
+            continue;
+#ifdef HAVE_LIBSSL
+        ssl = (conn_get_ssl(bi->conn) != NULL);
+#endif
+        url = octstr_format("%s://%s:%ld", ssl ? "https" : "http",
+                            octstr_get_cstr(bi->client_ip), bi->http_port);
+        break;
+    }
+    gw_rwlock_unlock(smsbox_list_rwlock);
+
+    return url;
+}
 
 
 void boxc_cleanup(void)

@@ -110,6 +110,9 @@ int smsbox_restart(Cfg *config);
 
 Octstr *boxc_status(int status_type);
 
+/* base sendsms URL of a connected smsbox (for the admin-panel send proxy) */
+Octstr *boxc_sendsms_url(Octstr *boxc_id);
+
 /* Clean up after box connections have died. */
 void boxc_cleanup(void);
 
@@ -160,6 +163,13 @@ int smsc2_restart_smsc(Octstr *id);  /* re-start a specific smsc */
 int smsc2_add_smsc(Octstr *id);   /* add a new smsc */
 int smsc2_remove_smsc(Octstr *id);   /* remove a specific smsc */
 
+/* runtime SMSC configuration persistence (admin panel) */
+Octstr *smsc2_config_dir(void);   /* configured smsc-config-dir, or NULL */
+int smsc2_smsc_exists(Octstr *id);  /* is an smsc-id in the running list? */
+int smsc2_write_smsc_config(Octstr *id, Octstr *block);  /* persist a group file */
+Octstr *smsc2_read_smsc_config(Octstr *id);  /* raw persisted group file, or NULL */
+int smsc2_delete_smsc_config(Octstr *id);  /* remove a persisted group file */
+
 int smsc2_reload_lists(void); /* reload blacklists */
 
 
@@ -178,6 +188,11 @@ void httpadmin_stop(void);
 
 /* passes the access-log-format string from config to the module */
 void bb_alog_init(const Octstr *format);
+
+/* optional PostgreSQL message logging for the admin panel report pages */
+void msglog_init(Cfg *cfg);
+void msglog_shutdown(void);
+Octstr *msglog_query_json(Octstr *type, long limit);
 
 /* cleanup for internal things */
 void bb_alog_shutdown(void);
@@ -203,6 +218,10 @@ int bb_stop_smsc(Octstr *id);
 int bb_add_smsc(Octstr *id);
 int bb_remove_smsc(Octstr *id);
 int bb_restart_smsc(Octstr *id);
+Octstr *bb_smsc_config_dir(void);
+int bb_save_smsc_config(Octstr *id, Octstr *block);
+Octstr *bb_read_smsc_config(Octstr *id);
+int bb_delete_smsc_config(Octstr *id);
 int bb_remove_message(Octstr *id);
 int bb_reload_lists(void);
 int bb_reload_smsc_groups(void);

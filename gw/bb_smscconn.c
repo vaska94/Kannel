@@ -131,6 +131,11 @@ static Cfg *cfg_reloaded;
 static List *smsc_groups;
 static Octstr *unified_prefix;
 
+/* directory where SMSC connections added via the admin panel are persisted;
+ * NULL disables runtime SMSC configuration. Set from the core group directive
+ * 'smsc-config-dir' and must be part of the main config via an 'include'. */
+static Octstr *smsc_config_dir;
+
 static RWLock white_black_list_lock;
 static Octstr *black_list_sender_url;
 static Octstr *white_list_sender_url;
@@ -824,6 +829,10 @@ int smsc2_start(Cfg *cfg)
 
     grp = cfg_get_single_group(cfg, octstr_imm("core"));
     unified_prefix = cfg_get(grp, octstr_imm("unified-prefix"));
+    smsc_config_dir = cfg_get(grp, octstr_imm("smsc-config-dir"));
+    if (smsc_config_dir != NULL)
+        info(0, "Runtime SMSC configuration enabled, storing in `%s'.",
+             octstr_get_cstr(smsc_config_dir));
 
     gw_rwlock_init_static(&white_black_list_lock);
     white_list_sender = black_list_sender = NULL;
@@ -1156,6 +1165,143 @@ int smsc2_add_smsc(Octstr *id)
         error(0, "SMSC %s not found", octstr_get_cstr(id));
         return -1;
     }
+    return 0;
+}
+
+/*
+ * Runtime SMSC configuration management.
+ *
+ * SMSC connections created via the admin panel are persisted as individual
+ * files in the 'smsc-config-dir' directory, which the main configuration pulls
+ * in via an 'include' directive. After a file is written or removed the caller
+ * triggers a graceful restart (the same code path as a SIGHUP), which re-reads
+ * the configuration and diffs the running SMSCs: new ones are added, deleted
+ * ones are shut down and changed routing is applied live, without disconnecting
+ * untouched connections. See smsc2_graceful_restart().
+ */
+
+Octstr *smsc2_config_dir(void)
+{
+    return smsc_config_dir;
+}
+
+/* Whether an SMSC connection with this admin/smsc-id is currently in the
+ * running list (i.e. was successfully created). Used to detect a config that
+ * was written but failed to start. */
+int smsc2_smsc_exists(Octstr *id)
+{
+    long i;
+
+    if (!smsc_running)
+        return 0;
+    gw_rwlock_rdlock(&smsc_list_lock);
+    i = smsc2_find(id, 0);
+    gw_rwlock_unlock(&smsc_list_lock);
+    return (i != -1);
+}
+
+/*
+ * Build the on-disk path for a given smsc-id. Caller must free.
+ * The id is validated by the caller to contain only [A-Za-z0-9._-], so it is
+ * safe to use verbatim as a filename (no directory separators or traversal).
+ */
+static Octstr *smsc_config_path(Octstr *id)
+{
+    Octstr *path;
+
+    if (smsc_config_dir == NULL || octstr_len(id) == 0)
+        return NULL;
+    path = octstr_duplicate(smsc_config_dir);
+    octstr_append_cstr(path, "/");
+    octstr_append(path, id);
+    octstr_append_cstr(path, ".conf");
+    return path;
+}
+
+int smsc2_write_smsc_config(Octstr *id, Octstr *block)
+{
+    Octstr *path, *tmp;
+    FILE *f;
+
+    if (smsc_config_dir == NULL) {
+        error(0, "SMSC config: 'smsc-config-dir' is not configured.");
+        return -1;
+    }
+    if ((path = smsc_config_path(id)) == NULL)
+        return -1;
+
+    /* write to a temporary file first, then rename() for atomicity so a
+     * concurrent config reload never sees a half-written group */
+    tmp = octstr_duplicate(path);
+    octstr_append_cstr(tmp, ".tmp");
+
+    if ((f = fopen(octstr_get_cstr(tmp), "w")) == NULL) {
+        error(errno, "SMSC config: cannot open `%s' for writing.", octstr_get_cstr(tmp));
+        octstr_destroy(path);
+        octstr_destroy(tmp);
+        return -1;
+    }
+    if (octstr_print(f, block) == -1 || fflush(f) != 0) {
+        error(errno, "SMSC config: cannot write `%s'.", octstr_get_cstr(tmp));
+        fclose(f);
+        unlink(octstr_get_cstr(tmp));
+        octstr_destroy(path);
+        octstr_destroy(tmp);
+        return -1;
+    }
+    fclose(f);
+
+    if (rename(octstr_get_cstr(tmp), octstr_get_cstr(path)) != 0) {
+        error(errno, "SMSC config: cannot rename `%s' to `%s'.",
+              octstr_get_cstr(tmp), octstr_get_cstr(path));
+        unlink(octstr_get_cstr(tmp));
+        octstr_destroy(path);
+        octstr_destroy(tmp);
+        return -1;
+    }
+
+    info(0, "SMSC config: wrote connection `%s' to `%s'.",
+         octstr_get_cstr(id), octstr_get_cstr(path));
+    octstr_destroy(path);
+    octstr_destroy(tmp);
+    return 0;
+}
+
+Octstr *smsc2_read_smsc_config(Octstr *id)
+{
+    Octstr *path, *contents;
+
+    if (smsc_config_dir == NULL)
+        return NULL;
+    if ((path = smsc_config_path(id)) == NULL)
+        return NULL;
+
+    contents = octstr_read_file(octstr_get_cstr(path));
+    octstr_destroy(path);
+    return contents;   /* NULL if the file does not exist */
+}
+
+int smsc2_delete_smsc_config(Octstr *id)
+{
+    Octstr *path;
+    int ret;
+
+    if (smsc_config_dir == NULL) {
+        error(0, "SMSC config: 'smsc-config-dir' is not configured.");
+        return -1;
+    }
+    if ((path = smsc_config_path(id)) == NULL)
+        return -1;
+
+    ret = unlink(octstr_get_cstr(path));
+    if (ret != 0 && errno != ENOENT) {
+        error(errno, "SMSC config: cannot remove `%s'.", octstr_get_cstr(path));
+        octstr_destroy(path);
+        return -1;
+    }
+    if (ret == 0)
+        info(0, "SMSC config: removed connection file `%s'.", octstr_get_cstr(path));
+    octstr_destroy(path);
     return 0;
 }
 

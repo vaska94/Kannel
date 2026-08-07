@@ -370,6 +370,356 @@ static Octstr *httpd_remove_message(List *cgivars, int status_type)
         return octstr_create("Message id not given");
 }
 
+/*
+ * SMSC directives that may be set through the admin panel. 'smsc' (type) and
+ * 'smsc-id' are mandatory and handled explicitly; everything else is optional
+ * and only written when supplied. This is a strict allow-list: any CGI
+ * variable not named here is ignored, so the endpoint cannot be used to inject
+ * arbitrary core/group directives.
+ */
+static const char *smsc_cfg_allowed[] = {
+    "host", "port", "receive-port", "our-port",
+    "smsc-username", "smsc-password", "system-type", "system-id",
+    "interface-version", "address-range", "msg-id-type",
+    "source-addr-ton", "source-addr-npi", "dest-addr-ton", "dest-addr-npi",
+    "transceiver-mode", "connect-allow-ip",
+    "allowed-smsc-id", "denied-smsc-id", "preferred-smsc-id",
+    "reconnect-delay", "enquire-link-interval", "max-pending-submits",
+    "throughput", "window", "instances", "log-level",
+    NULL
+};
+
+/* smsc-id is used verbatim as a filename, so keep it to a safe charset */
+static int smsc_cfg_valid_id(Octstr *id)
+{
+    long i, len = octstr_len(id);
+
+    if (len == 0 || len > 64)
+        return 0;
+    for (i = 0; i < len; i++) {
+        int c = octstr_get_char(id, i);
+        if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+              (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-'))
+            return 0;
+    }
+    return 1;
+}
+
+static int smsc_cfg_valid_type(Octstr *type)
+{
+    long i, len = octstr_len(type);
+
+    if (len == 0 || len > 32)
+        return 0;
+    for (i = 0; i < len; i++) {
+        int c = octstr_get_char(type, i);
+        if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '-'))
+            return 0;
+    }
+    return 1;
+}
+
+/* reject values that would break the line-based config format */
+static int smsc_cfg_has_ctrl(Octstr *v)
+{
+    long i, len = octstr_len(v);
+
+    for (i = 0; i < len; i++) {
+        int c = octstr_get_char(v, i);
+        if (c == '\r' || c == '\n' || c == '\0')
+            return 1;
+    }
+    return 0;
+}
+
+/*
+ * Quote a value for the config file. cfg's parse_value() strips one layer of
+ * surrounding double quotes and un-escapes \\ and \", so escaping backslash
+ * and double-quote here round-trips any value safely (spaces included).
+ */
+static Octstr *smsc_cfg_quote(Octstr *value)
+{
+    Octstr *out = octstr_create("\"");
+    Octstr *tmp = octstr_duplicate(value);
+
+    octstr_replace(tmp, octstr_imm("\\"), octstr_imm("\\\\"));
+    octstr_replace(tmp, octstr_imm("\""), octstr_imm("\\\""));
+    octstr_append(out, tmp);
+    octstr_append_cstr(out, "\"");
+    octstr_destroy(tmp);
+    return out;
+}
+
+static Octstr *httpd_save_smsc_config(List *cgivars, int status_type)
+{
+    Octstr *reply, *id, *type, *block, *val, *q;
+    int i;
+
+    if ((reply = httpd_check_authorization(cgivars, 0)) != NULL) return reply;
+    if ((reply = httpd_check_status()) != NULL) return reply;
+
+    if (bb_smsc_config_dir() == NULL)
+        return octstr_create("Runtime SMSC configuration is disabled "
+                             "(set 'smsc-config-dir' in the core group)");
+
+    id = http_cgi_variable(cgivars, "smsc-id");
+    type = http_cgi_variable(cgivars, "smsc");
+    if (id == NULL || octstr_len(id) == 0)
+        return octstr_create("smsc-id is required");
+    if (!smsc_cfg_valid_id(id))
+        return octstr_create("Invalid smsc-id (allowed: letters, digits, '.', '_', '-'; max 64)");
+    if (type == NULL || octstr_len(type) == 0)
+        return octstr_create("smsc (type) is required");
+    if (!smsc_cfg_valid_type(type))
+        return octstr_create("Invalid smsc type (allowed: lowercase letters, digits, '_', '-')");
+
+    /*
+     * A network SMSC without a host silently fails to start; because a save
+     * triggers a graceful restart, that would drop the previously-working
+     * connection and leave only the broken file on disk. Reject it so an
+     * incomplete edit can't destroy a working SMSC.
+     */
+    val = http_cgi_variable(cgivars, "host");
+    if ((val == NULL || octstr_len(val) == 0) &&
+        octstr_str_compare(type, "fake") != 0 &&
+        octstr_str_compare(type, "loopback") != 0)
+        return octstr_format("host is required for smsc type `%S'", type);
+
+    block = octstr_create("# SMSC connection managed by the Kamex admin panel\n");
+    octstr_append_cstr(block, "group = smsc\n");
+    q = smsc_cfg_quote(type);
+    octstr_format_append(block, "smsc = %S\n", q);
+    octstr_destroy(q);
+    q = smsc_cfg_quote(id);
+    octstr_format_append(block, "smsc-id = %S\n", q);
+    octstr_destroy(q);
+
+    for (i = 0; smsc_cfg_allowed[i] != NULL; i++) {
+        val = http_cgi_variable(cgivars, smsc_cfg_allowed[i]);
+        if (val == NULL || octstr_len(val) == 0)
+            continue;
+        if (smsc_cfg_has_ctrl(val)) {
+            octstr_destroy(block);
+            return octstr_format("Invalid value for `%s' (control characters not allowed)",
+                                 smsc_cfg_allowed[i]);
+        }
+        q = smsc_cfg_quote(val);
+        octstr_format_append(block, "%s = %S\n", smsc_cfg_allowed[i], q);
+        octstr_destroy(q);
+    }
+
+    switch (bb_save_smsc_config(id, block)) {
+    case -2:
+        octstr_destroy(block);
+        return octstr_format("SMSC `%S' did not start and was rolled back. "
+                             "Check required fields (SMPP needs host, port, "
+                             "username, password and system-type).", id);
+    case -1:
+        octstr_destroy(block);
+        return octstr_format("Failed to save SMSC `%S' (check the log)", id);
+    default:
+        octstr_destroy(block);
+        return octstr_format("SMSC `%S' saved and activated", id);
+    }
+}
+
+/* append s to out, escaped as a JSON string body (no surrounding quotes) */
+static void smsc_cfg_json_append(Octstr *out, Octstr *s)
+{
+    long i, len = octstr_len(s);
+
+    for (i = 0; i < len; i++) {
+        int c = octstr_get_char(s, i);
+        switch (c) {
+            case '"':  octstr_append_cstr(out, "\\\""); break;
+            case '\\': octstr_append_cstr(out, "\\\\"); break;
+            case '\n': octstr_append_cstr(out, "\\n"); break;
+            case '\r': octstr_append_cstr(out, "\\r"); break;
+            case '\t': octstr_append_cstr(out, "\\t"); break;
+            default:   octstr_append_char(out, c); break;
+        }
+    }
+}
+
+/*
+ * Return the persisted directives of an SMSC as a JSON object so the admin
+ * panel can populate the edit form. Requires the admin password (the reply
+ * includes the SMSC password). Request with a .json suffix for a JSON reply.
+ */
+static Octstr *httpd_get_smsc_config(List *cgivars, int status_type)
+{
+    Octstr *reply, *id, *raw, *json, *line;
+    List *lines;
+    int first = 1;
+
+    if ((reply = httpd_check_authorization(cgivars, 0)) != NULL) return reply;
+
+    if (bb_smsc_config_dir() == NULL)
+        return octstr_create("Runtime SMSC configuration is disabled");
+
+    id = http_cgi_variable(cgivars, "smsc");
+    if (id == NULL)
+        id = http_cgi_variable(cgivars, "smsc-id");
+    if (id == NULL || octstr_len(id) == 0)
+        return octstr_create("SMSC id not given");
+    if (!smsc_cfg_valid_id(id))
+        return octstr_create("Invalid smsc-id");
+
+    raw = bb_read_smsc_config(id);
+    if (raw == NULL)
+        return octstr_create("{}");   /* unknown id -> empty object */
+
+    json = octstr_create("{");
+    lines = octstr_split(raw, octstr_imm("\n"));
+    while ((line = gwlist_extract_first(lines)) != NULL) {
+        long eq;
+        Octstr *key, *val;
+
+        octstr_strip_blanks(line);
+        if (octstr_len(line) == 0 || octstr_get_char(line, 0) == '#') {
+            octstr_destroy(line);
+            continue;
+        }
+        eq = octstr_search_char(line, '=', 0);
+        if (eq < 0) { octstr_destroy(line); continue; }
+        key = octstr_copy(line, 0, eq);
+        val = octstr_copy(line, eq + 1, octstr_len(line) - eq - 1);
+        octstr_strip_blanks(key);
+        octstr_strip_blanks(val);
+        if (octstr_str_compare(key, "group") == 0) {
+            octstr_destroy(key); octstr_destroy(val); octstr_destroy(line);
+            continue;
+        }
+        /* reverse of smsc_cfg_quote(): drop surrounding quotes, unescape */
+        if (octstr_len(val) >= 2 && octstr_get_char(val, 0) == '"' &&
+            octstr_get_char(val, octstr_len(val) - 1) == '"') {
+            octstr_delete(val, octstr_len(val) - 1, 1);
+            octstr_delete(val, 0, 1);
+            octstr_replace(val, octstr_imm("\\\""), octstr_imm("\""));
+            octstr_replace(val, octstr_imm("\\\\"), octstr_imm("\\"));
+        }
+        if (!first) octstr_append_char(json, ',');
+        first = 0;
+        octstr_append_char(json, '"');
+        smsc_cfg_json_append(json, key);
+        octstr_append_cstr(json, "\":\"");
+        smsc_cfg_json_append(json, val);
+        octstr_append_char(json, '"');
+        octstr_destroy(key); octstr_destroy(val); octstr_destroy(line);
+    }
+    gwlist_destroy(lines, octstr_destroy_item);
+    octstr_append_char(json, '}');
+    octstr_destroy(raw);
+    return json;
+}
+
+static Octstr *httpd_delete_smsc_config(List *cgivars, int status_type)
+{
+    Octstr *reply, *id;
+
+    if ((reply = httpd_check_authorization(cgivars, 0)) != NULL) return reply;
+    if ((reply = httpd_check_status()) != NULL) return reply;
+
+    if (bb_smsc_config_dir() == NULL)
+        return octstr_create("Runtime SMSC configuration is disabled "
+                             "(set 'smsc-config-dir' in the core group)");
+
+    id = http_cgi_variable(cgivars, "smsc");
+    if (id == NULL)
+        id = http_cgi_variable(cgivars, "smsc-id");
+    if (id == NULL || octstr_len(id) == 0)
+        return octstr_create("SMSC id not given");
+    if (!smsc_cfg_valid_id(id))
+        return octstr_create("Invalid smsc-id");
+
+    if (bb_delete_smsc_config(id) == -1)
+        return octstr_format("Failed to delete SMSC `%S' (check the log)", id);
+    return octstr_format("SMSC `%S' deleted", id);
+}
+
+/*
+ * Send a test SMS through a connected smsbox. The admin panel is served by
+ * bearerbox, but sending is an smsbox function; a browser cannot reach the
+ * smsbox's (often internal) address cross-origin. So bearerbox proxies the
+ * request here: it validates the admin password, then forwards the sendsms
+ * call to the smsbox over the internal network and relays the response.
+ */
+static Octstr *httpd_send_sms(List *cgivars, int status_type)
+{
+    Octstr *reply, *pwd, *boxc, *base, *url, *v, *final_url, *body;
+    List *reply_headers = NULL;
+    int ret, i;
+    /* sendsms parameters we are willing to forward */
+    static const char *fwd[] = {
+        "from", "to", "text", "smsc", "dlr-mask", "dlr-url", "coding",
+        "mclass", "mwi", "validity", "deferred", "charset", "udh", "account",
+        "pid", "alt-dcs", "rpi", "binfo", "priority", NULL
+    };
+
+    if ((reply = httpd_check_authorization(cgivars, 0)) != NULL) return reply;
+
+    pwd = http_cgi_variable(cgivars, "password");
+    boxc = http_cgi_variable(cgivars, "smsbox");   /* optional target smsbox id */
+
+    base = boxc_sendsms_url(boxc);
+    if (base == NULL)
+        return octstr_create("No smsbox connected to send through");
+
+    /* forward as the 'admin' sendsms-user with the (already validated) password */
+    url = octstr_format("%S/cgi-bin/sendsms?username=admin", base);
+    octstr_destroy(base);
+    if (pwd != NULL) {
+        v = octstr_duplicate(pwd);
+        octstr_url_encode(v);
+        octstr_format_append(url, "&password=%S", v);
+        octstr_destroy(v);
+    }
+    for (i = 0; fwd[i] != NULL; i++) {
+        Octstr *raw = http_cgi_variable(cgivars, fwd[i]);
+        if (raw == NULL || octstr_len(raw) == 0)
+            continue;
+        v = octstr_duplicate(raw);
+        octstr_url_encode(v);
+        octstr_format_append(url, "&%s=%S", fwd[i], v);
+        octstr_destroy(v);
+    }
+
+    final_url = body = NULL;
+    ret = http_get_real(HTTP_METHOD_GET, url, NULL, &final_url, &reply_headers, &body);
+    octstr_destroy(url);
+    octstr_destroy(final_url);
+    if (reply_headers != NULL)
+        http_destroy_headers(reply_headers);
+
+    if (ret < 0 || body == NULL) {
+        octstr_destroy(body);
+        return octstr_create("Failed to reach the smsbox sendsms interface");
+    }
+    return body;   /* relay the smsbox response verbatim */
+}
+
+/*
+ * Report data for the admin panel Inbox/Outbox/DLR pages. Read-only, so the
+ * status password is sufficient. Returns a JSON array of recent message_log
+ * rows of the requested type. Request as .json for a JSON content type.
+ */
+static Octstr *httpd_messages(List *cgivars, int status_type)
+{
+    Octstr *reply, *type, *limit_s;
+    long limit = 100;
+
+    if ((reply = httpd_check_authorization(cgivars, 1)) != NULL) return reply;
+
+    type = http_cgi_variable(cgivars, "type");
+    if (type == NULL || octstr_len(type) == 0)
+        type = octstr_imm("MO");
+    limit_s = http_cgi_variable(cgivars, "limit");
+    if (limit_s != NULL)
+        limit = atol(octstr_get_cstr(limit_s));
+
+    return msglog_query_json(type, limit);
+}
+
 /* Known httpd commands and their functions */
 static struct httpd_command {
     const char *command;
@@ -389,6 +739,11 @@ static struct httpd_command {
     { "start-smsc", httpd_restart_smsc },
     { "add-smsc", httpd_add_smsc },
     { "remove-smsc", httpd_remove_smsc },
+    { "save-smsc-config", httpd_save_smsc_config },
+    { "get-smsc-config", httpd_get_smsc_config },
+    { "delete-smsc-config", httpd_delete_smsc_config },
+    { "send-sms", httpd_send_sms },
+    { "messages", httpd_messages },
     { "reload-lists", httpd_reload_lists },
     { "remove-message", httpd_remove_message },
     { NULL , NULL } /* terminate list */

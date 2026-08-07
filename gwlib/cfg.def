@@ -136,6 +136,8 @@ SINGLE_GROUP(core,
     OCTSTR(ssl-server-cipher-list)
     OCTSTR(dlr-storage)
     OCTSTR(dlr-spool)
+    OCTSTR(smsc-config-dir)         /* directory for admin-panel managed SMSC connections */
+    OCTSTR(msglog-pgsql-id)         /* pgsql-connection id for Inbox/Outbox/DLR report logging */
     OCTSTR(maximum-queue-length)    /* deprecated, supported until next major stable release */
     OCTSTR(sms-incoming-queue-limit)
     OCTSTR(sms-outgoing-queue-limit)
