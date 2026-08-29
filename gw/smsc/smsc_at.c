@@ -2129,7 +2129,7 @@ static Msg *at2_pdu_decode_report_sm(Octstr *data, PrivAT2data *privdata)
      * categories. It will catch "reserved" values where the first 3 MSBits 
      * are not set as "Success" which may not be correct. */
 
-    if ((dlrmsg = dlr_find(privdata->conn->id, msg_id, receiver, type, 0)) == NULL) {
+    if ((dlrmsg = dlr_find(privdata->conn->dlr_id, msg_id, receiver, type, 0)) == NULL) {
         debug("bb.smsc.at2", 1, "AT2[%s]: Received delivery notification but can't find that ID in the DLR storage",
               octstr_get_cstr(privdata->name));
 	    goto error;
@@ -2327,7 +2327,7 @@ static void at2_send_one_message(PrivAT2data *privdata, Msg *msg)
                     else {
                         Octstr *dlrmsgid = octstr_format("%d", msg_id);
 
-                        dlr_add(privdata->conn->id, dlrmsgid, msg, 0);
+                        dlr_add(privdata->conn->dlr_id, dlrmsgid, msg, 0);
 
                         O_DESTROY(dlrmsgid);
 

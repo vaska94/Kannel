@@ -363,6 +363,22 @@ SMSCConn *smscconn_create(CfgGroup *grp, int start_as_stopped)
     if (conn->admin_id == NULL)
         conn->admin_id = octstr_duplicate(conn->id);
 
+    /*
+     * Sets the dlr_id. Equals to connection id if empty.
+     *
+     * Point several connections at one value when an operator is reached over
+     * more than one bind and may return a receipt on a different bind than the
+     * message was submitted on. Without it the receipt is looked up under the
+     * bind it arrived on, finds nothing, and is dropped.
+     */
+    GET_OPTIONAL_VAL(conn->dlr_id, "dlr-smsc-id");
+    if (conn->dlr_id == NULL) {
+        conn->dlr_id = octstr_duplicate(conn->id);
+    } else if (octstr_compare(conn->dlr_id, conn->id) != 0) {
+        info(0, "SMSC <%s> stores delivery reports under <%s>",
+             octstr_get_cstr(conn->id), octstr_get_cstr(conn->dlr_id));
+    }
+
     /* configure the internal rerouting rules for this smsc id */
     init_reroute(conn, grp);
 
@@ -494,6 +510,7 @@ int smscconn_destroy(SMSCConn *conn)
     octstr_destroy(conn->name);
     octstr_destroy(conn->id);
     octstr_destroy(conn->admin_id);
+    octstr_destroy(conn->dlr_id);
     gwlist_destroy(conn->allowed_smsc_id, octstr_destroy_item);
     gwlist_destroy(conn->denied_smsc_id, octstr_destroy_item);
     gwlist_destroy(conn->preferred_smsc_id, octstr_destroy_item);

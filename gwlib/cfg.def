@@ -333,6 +333,7 @@ MULTI_GROUP(smsc,
     OCTSTR(our-host)
     OCTSTR(alt-dcs)
     OCTSTR(throughput)
+    OCTSTR(dlr-smsc-id)
     OCTSTR(throughput-mt)
     OCTSTR(throughput-mo)
     OCTSTR(dead-start)
