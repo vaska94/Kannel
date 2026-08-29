@@ -2,6 +2,29 @@
 
 All notable changes to Kamex (formerly Kannel) will be documented in this file.
 
+## [1.8.11] - 2026-08-29
+
+### Fixed
+- **OpenSMPPBox tore down the wrong session on a duplicate bind.** The
+  duplicate-bind check compared the incoming `system_type` against a live
+  session's `boxc_id`, which is wrong in both configurations:
+  - By default `boxc_id` *is* the `system_type` — free text that is routinely
+    `"SMPP"` or `"VMS"` for every account on the box. One customer rebinding
+    therefore disconnected an unrelated customer's live session.
+  - With `use-systemid-as-smsboxid = true`, `boxc_id` is the `system_id`, so the
+    check put two different fields against each other and matched only by
+    coincidence.
+
+  A bind is now matched against the identity the session is actually labelled
+  with, so a second bind displaces only its own earlier session.
+
+  **Note for deployments running `use-systemid-as-smsboxid = true`:** duplicate
+  binds were effectively never detected there, so a client holding two
+  simultaneous sessions of the same type under one account was tolerated. That
+  now behaves as intended and the earlier session is disconnected. If you rely
+  on multiple concurrent binds per account, this will disconnect them — a
+  configurable ceiling is being worked on separately (#6).
+
 ## [1.8.10] - 2026-08-29
 
 ### Added

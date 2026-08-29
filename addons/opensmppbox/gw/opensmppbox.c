@@ -288,6 +288,7 @@ int check_login(Boxc *boxc, Octstr *system_id, Octstr *password, Octstr *system_
 	int box;
 	int success;
 	Boxc *thisbox;
+	Octstr *this_id;
 	FILE *fp;
 	char systemid[255], passw[255], systemtype[255], allowed_ips[1024];
 	Octstr *allowed_ips_str;
@@ -326,9 +327,27 @@ int check_login(Boxc *boxc, Octstr *system_id, Octstr *password, Octstr *system_
 #endif
 	return 0;
 valid_login:
+	/*
+	 * Identify the account the same way the session itself will be labelled a
+	 * moment from now, so that a second bind displaces only its own earlier
+	 * session.
+	 *
+	 * This used to compare the incoming system_type against the stored
+	 * boxc_id, which is wrong in both configurations. By default boxc_id is
+	 * the system_type - free text that is routinely "SMPP" or "VMS" for every
+	 * account on the box - so one customer rebinding tore down another
+	 * customer's live session. With use-systemid-as-smsboxid set, boxc_id is
+	 * the system_id instead, so the comparison put two different fields
+	 * against each other and matched only by coincidence, leaving duplicate
+	 * binds to accumulate unnoticed.
+	 */
+	this_id = systemidisboxcid ? system_id : system_type;
+
 	for (box = 0; box < gwlist_len(all_boxes); box++) {
 		thisbox = (Boxc *)gwlist_get(all_boxes, box);
-		if (octstr_compare(system_type, thisbox->boxc_id) == 0 && (thisbox->login_type == SMPP_LOGIN_TRANSCEIVER || (thisbox->login_type == login_type))) {
+		if (thisbox->boxc_id != NULL &&
+		    octstr_compare(this_id, thisbox->boxc_id) == 0 &&
+		    (thisbox->login_type == SMPP_LOGIN_TRANSCEIVER || (thisbox->login_type == login_type))) {
 			debug("bb.sms.smpp", 0, "opensmppbox[%s]: Multiple login: disconnect.",
 				octstr_get_cstr(thisbox->boxc_id));
 			thisbox->alive = 0;
