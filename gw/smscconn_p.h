@@ -200,7 +200,8 @@ struct smscconn {
 
     int alt_dcs; /* use alternate DCS 0xFX */
 
-    double throughput;     /* message thoughput per sec. to be delivered to SMSC */
+    double throughput_mt;   /* message throughput per sec. to be delivered to SMSC */
+    double throughput_mo;   /* message throughput per sec. to be receiver from SMSC */
 
     /* Stores rerouting information for this specific smsc-id */
     int reroute;                /* simply turn MO into MT and process internally */

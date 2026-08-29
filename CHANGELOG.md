@@ -2,6 +2,27 @@
 
 All notable changes to Kamex (formerly Kannel) will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- **`throughput-mt` and `throughput-mo` in the `smsc` group**, splitting the
+  existing rate limit into separate MT and MO ceilings. Previously `throughput`
+  applied only to messages sent *to* the SMSC, so there was no way to limit how
+  fast an SMSC could deliver MO traffic and DLRs *to* the gateway. A bare
+  `throughput` still sets both, so existing configurations are unchanged.
+
+  Implemented for the SMPP, HTTP, EMI, AT and fake drivers. When the MO ceiling
+  is reached, SMPP replies to `deliver_sm`/`data_sm` with `ESME_RTHROTTLED` so a
+  well-behaved SMSC backs off and retries.
+
+  Adapted from a patch posted to the Kannel devel list in July 2022 by Stipe
+  Tolj, the upstream maintainer, which was reviewed once and never committed;
+  upstream trunk has not moved since May 2024. Two changes were needed: the
+  throttle path returned `ESME_RX_T_APPN`, an application-error code rather than
+  a throttling one — the point raised in the original review and never addressed
+  — and the hunk for the SMASI driver was dropped, that driver having been
+  removed in 1.7.5.
+
 ## [1.8.9] - 2026-08-06
 
 ### Fixed

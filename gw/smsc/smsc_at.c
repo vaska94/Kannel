@@ -2215,9 +2215,9 @@ static void at2_send_messages(PrivAT2data *privdata)
     if (privdata->modem->enable_mms && gw_prioqueue_len(privdata->outgoing_queue) > 1)                  
         at2_send_modem_command(privdata, "AT+CMMS=2", 0, 0);
 
-    if (privdata->conn->throughput > 0 && load_get(privdata->load, 0) >= privdata->conn->throughput) {
-      debug("bb.sms.at2", 0, "AT2[%s]: throughput limit exceeded (load: %.02f, throughput: %.02f)",
-            octstr_get_cstr(privdata->conn->id), load_get(privdata->load, 0), privdata->conn->throughput);
+    if (privdata->conn->throughput_mt > 0 && load_get(privdata->load, 0) >= privdata->conn->throughput_mt) {
+      debug("bb.sms.at2", 0, "AT2[%s]: MT throughput limit exceeded (load: %.02f, throughput: %.02f)",
+            octstr_get_cstr(privdata->conn->id), load_get(privdata->load, 0), privdata->conn->throughput_mt);
     } else {
       if ((msg = gw_prioqueue_remove(privdata->outgoing_queue))) {                 
           load_increase(privdata->load);

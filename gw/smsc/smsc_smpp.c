@@ -183,7 +183,8 @@ typedef struct {
     int wait_ack_action;
     int esm_class;
     long log_format;
-    Load *load;
+    Load *load_mt;
+    Load *load_mo;
     SMSCConn *conn;
 } SMPP;
 
@@ -283,8 +284,10 @@ static SMPP *smpp_create(SMSCConn *conn, Octstr *host, int transmit_port,
     smpp->bind_addr_npi = 0;
     smpp->use_ssl = 0;
     smpp->ssl_client_certkey_file = NULL;
-    smpp->load = load_create_real(0);
-    load_add_interval(smpp->load, 1);
+    smpp->load_mt = load_create_real(0);
+    load_add_interval(smpp->load_mt, 1);
+    smpp->load_mo = load_create_real(0);
+    load_add_interval(smpp->load_mo, 1);
     smpp->esm_class = esm_class;
 
     return smpp;
@@ -308,7 +311,8 @@ static void smpp_destroy(SMPP *smpp)
         octstr_destroy(smpp->alt_charset);
         octstr_destroy(smpp->alt_addr_charset);
         octstr_destroy(smpp->ssl_client_certkey_file);
-        load_destroy(smpp->load);
+        load_destroy(smpp->load_mt);
+        load_destroy(smpp->load_mo);
         gw_free(smpp);
     }
 }
@@ -1263,13 +1267,13 @@ static int send_messages(SMPP *smpp, Connection *conn, long *pending_submits)
 
     while (*pending_submits < smpp->max_pending_submits) {
         /* check our throughput */
-        if (smpp->conn->throughput > 0 && load_get(smpp->load, 0) >= smpp->conn->throughput) {
-            debug("bb.sms.smpp", 0, "SMPP[%s]: throughput limit exceeded (%.02f,%.02f)",
-                  octstr_get_cstr(smpp->conn->id), load_get(smpp->load, 0), smpp->conn->throughput);
+        if (smpp->conn->throughput_mt > 0 && load_get(smpp->load_mt, 0) >= smpp->conn->throughput_mt) {
+            debug("bb.sms.smpp", 0, "SMPP[%s]: MT throughput limit exceeded (%.02f,%.02f)",
+                  octstr_get_cstr(smpp->conn->id), load_get(smpp->load_mt, 0), smpp->conn->throughput_mt);
             break;
         }
-        debug("bb.sms.smpp", 0, "SMPP[%s]: throughput (%.02f,%.02f)",
-              octstr_get_cstr(smpp->conn->id), load_get(smpp->load, 0), smpp->conn->throughput);
+        debug("bb.sms.smpp", 0, "SMPP[%s]: MT throughput (%.02f,%.02f)",
+              octstr_get_cstr(smpp->conn->id), load_get(smpp->load_mt, 0), smpp->conn->throughput_mt);
 
         /* Get next message, quit if none to be sent */
         msg = gw_prioqueue_remove(smpp->msgs_to_send);
@@ -1290,7 +1294,7 @@ static int send_messages(SMPP *smpp, Connection *conn, long *pending_submits)
             smpp_pdu_destroy(pdu);
             octstr_destroy(os);
             ++(*pending_submits);
-            load_increase(smpp->load);
+            load_increase(smpp->load_mt);
         }
         else { /* write error occurs */
             smpp_pdu_destroy(pdu);
@@ -1758,6 +1762,7 @@ static int handle_pdu(SMPP *smpp, Connection *conn, SMPP_PDU *pdu,
                 return 0;
             }
             resp = smpp_pdu_create(data_sm_resp, pdu->u.data_sm.sequence_number);
+
             /*
              * If SMSCConn stopped then send temp. error code
              */
@@ -1768,6 +1773,25 @@ static int handle_pdu(SMPP *smpp, Connection *conn, SMPP_PDU *pdu,
                 break;
             }
             mutex_unlock(smpp->conn->flow_mutex);
+
+            /* check our throughput */
+            if (smpp->conn->throughput_mo > 0 && load_get(smpp->load_mo, 0) >= smpp->conn->throughput_mo) {
+                debug("bb.sms.smpp", 0, "SMPP[%s]: MO throughput limit exceeded (%.02f,%.02f)",
+                      octstr_get_cstr(smpp->conn->id), load_get(smpp->load_mo, 0), smpp->conn->throughput_mo);
+                /*
+                 * Throttling, not an application fault: RX_T_APPN says the
+                 * receiver hit a temporary error, which is what the stopped
+                 * case above reports. Telling the SMSC it exceeded a rate is
+                 * what RTHROTTLED is for, and it is the code a sender is
+                 * expected to back off on.
+                 */
+                resp->u.data_sm_resp.command_status = SMPP_ESME_RTHROTTLED;
+                break;
+            }
+            debug("bb.sms.smpp", 0, "SMPP[%s]: MO throughput (%.02f,%.02f)",
+                  octstr_get_cstr(smpp->conn->id), load_get(smpp->load_mo, 0), smpp->conn->throughput_mo);
+            load_increase(smpp->load_mo);
+
             /* got a deliver ack (DLR)?
              * NOTE: following SMPP v3.4. spec. we are interested
              *       only on bits 2-5 (some SMSC's send 0x44, and it's
@@ -1824,6 +1848,7 @@ static int handle_pdu(SMPP *smpp, Connection *conn, SMPP_PDU *pdu,
                         octstr_get_cstr(smpp->conn->id), pdu->type_name);
                 return 0;
             }
+            resp = smpp_pdu_create(deliver_sm_resp, pdu->u.deliver_sm.sequence_number);
 
             /*
              * If SMSCConn stopped then send temp. error code
@@ -1831,12 +1856,22 @@ static int handle_pdu(SMPP *smpp, Connection *conn, SMPP_PDU *pdu,
             mutex_lock(smpp->conn->flow_mutex);
             if (smpp->conn->is_stopped) {
                 mutex_unlock(smpp->conn->flow_mutex);
-                resp = smpp_pdu_create(deliver_sm_resp,
-                        pdu->u.deliver_sm.sequence_number);
                 resp->u.deliver_sm_resp.command_status = SMPP_ESME_RX_T_APPN;
                 break;
             }
             mutex_unlock(smpp->conn->flow_mutex);
+
+            /* check our throughput */
+            if (smpp->conn->throughput_mo > 0 && load_get(smpp->load_mo, 0) >= smpp->conn->throughput_mo) {
+                debug("bb.sms.smpp", 0, "SMPP[%s]: MO throughput limit exceeded (%.02f,%.02f)",
+                      octstr_get_cstr(smpp->conn->id), load_get(smpp->load_mo, 0), smpp->conn->throughput_mo);
+                /* see the data_sm path above: throttling, not an app fault */
+                resp->u.deliver_sm_resp.command_status = SMPP_ESME_RTHROTTLED;
+                break;
+            }
+            debug("bb.sms.smpp", 0, "SMPP[%s]: MO throughput (%.02f,%.02f)",
+                  octstr_get_cstr(smpp->conn->id), load_get(smpp->load_mo, 0), smpp->conn->throughput_mo);
+            load_increase(smpp->load_mo);
 
             /* 
              * Got a deliver ack (DLR)?
@@ -1851,7 +1886,6 @@ static int handle_pdu(SMPP *smpp, Connection *conn, SMPP_PDU *pdu,
 
                 dlrmsg = handle_dlr(smpp, pdu->u.deliver_sm.source_addr, pdu->u.deliver_sm.short_message, pdu->u.deliver_sm.message_payload,
                                     pdu->u.deliver_sm.receipted_message_id, pdu->u.deliver_sm.message_state, pdu->u.deliver_sm.network_error_code);
-                resp = smpp_pdu_create(deliver_sm_resp, pdu->u.deliver_sm.sequence_number);
                 if (dlrmsg != NULL) {
                     if (dlrmsg->sms.meta_data == NULL)
                         dlrmsg->sms.meta_data = octstr_create("");
@@ -1871,8 +1905,7 @@ static int handle_pdu(SMPP *smpp, Connection *conn, SMPP_PDU *pdu,
                 }
                 resp->u.deliver_sm_resp.command_status = smscconn_failure_reason_to_smpp_status(reason);
             } else {/* MO-SMS */
-                resp = smpp_pdu_create(deliver_sm_resp,
-                            pdu->u.deliver_sm.sequence_number);
+
                 /* ensure the smsc-id is set */
                 msg = pdu_to_msg(smpp, pdu, &reason);
                 if (msg == NULL) {
@@ -2416,9 +2449,9 @@ static void io_thread(void *arg)
                     smpp->throttling_err_time > 0 && pending_submits < smpp->max_pending_submits) {
                     time_t tr_timeout = smpp->throttling_err_time + SMPP_THROTTLING_SLEEP_TIME - now;
                     timeout = timeout > tr_timeout ? tr_timeout : timeout;
-                } else if (transmitter && gw_prioqueue_len(smpp->msgs_to_send) > 0 && smpp->conn->throughput > 0 &&
+                } else if (transmitter && gw_prioqueue_len(smpp->msgs_to_send) > 0 && smpp->conn->throughput_mt > 0 &&
                            smpp->max_pending_submits > pending_submits) {
-                    double t = 1.0 / smpp->conn->throughput;
+                    double t = 1.0 / smpp->conn->throughput_mt;
                     timeout = t < timeout ? t : timeout;
                 }
                 /* sleep a while */
