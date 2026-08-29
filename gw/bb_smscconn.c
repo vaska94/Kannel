@@ -2272,7 +2272,17 @@ static int concat_handling_check_and_handle(Msg **pmsg, Octstr *smscid, long tim
      
     msg_dump(msg, 0);
      
-    key = octstr_format("'%S' '%S' '%S' '%d' '%d' '%H'", msg->sms.sender, msg->sms.receiver, smscid, refnum, totalparts, udh);
+    /*
+     * Deliberately not keyed on the residual UDH.
+     *
+     * It used to be, which meant two parts of one message whose remaining
+     * information elements differed hashed to different buckets: each became
+     * its own set of one, neither ever completed, and both were dropped when
+     * the timeout swept them, with nothing logged. Parts are identified by
+     * sender, receiver, SMSC, reference and part count -- everything the
+     * concatenation header actually promises is shared.
+     */
+    key = octstr_format("'%S' '%S' '%S' '%d' '%d'", msg->sms.sender, msg->sms.receiver, smscid, refnum, totalparts);
     mutex_lock(concat_lock);
     if ((cmsg = dict_get(incoming_concat_msgs, key)) == NULL) {
         cmsg = gw_malloc(sizeof(*cmsg));
@@ -2289,6 +2299,16 @@ static int concat_handling_check_and_handle(Msg **pmsg, Octstr *smscid, long tim
         memset(cmsg->parts, 0, cmsg->total_parts * sizeof(*cmsg->parts)); /* clear it. */
 
         dict_put(incoming_concat_msgs, key, cmsg);
+    } else if (part == 1 && udh != NULL) {
+        /*
+         * The reassembled message carries one part's residual UDH and the
+         * others are dropped. Now that differing parts share a bucket, prefer
+         * the first part's: parts can arrive in any order, so keeping whichever
+         * turned up first would make the result depend on the network.
+         */
+        octstr_destroy(cmsg->udh);
+        cmsg->udh = udh;
+        udh = NULL;
     }
     octstr_destroy(key);
     octstr_destroy(udh);

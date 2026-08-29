@@ -2,6 +2,26 @@
 
 All notable changes to Kamex (formerly Kannel) will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- **Concatenated inbound messages were not reassembled when their parts carried
+  differing UDH elements.** The reassembly key included the residual UDH — the
+  information elements left after the concatenation header is removed — so two
+  parts of one message that differed there hashed to different buckets. Neither
+  set ever completed, and each part was eventually delivered on its own once the
+  reassembly timeout expired.
+
+  The application therefore received fragments instead of one message, delayed
+  by the whole of `sms-combine-concatenated-mo-timeout` — half an hour at the
+  default. Parts are now keyed on sender, receiver, SMSC, reference number and
+  part count, which is everything the concatenation header actually promises the
+  parts share. The reassembled message takes the first part's residual UDH; it
+  already took one part's and discarded the rest, but which one depended on
+  arrival order.
+
+  Reported to the Kannel devel list in April 2020 and never answered.
+
 ## [1.9.2] - 2026-08-29
 
 ### Added
