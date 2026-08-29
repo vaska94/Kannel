@@ -2,7 +2,7 @@
 
 All notable changes to Kamex (formerly Kannel) will be documented in this file.
 
-## [Unreleased]
+## [1.9.3] - 2026-08-29
 
 ### Fixed
 - **Concatenated inbound messages were not reassembled when their parts carried
