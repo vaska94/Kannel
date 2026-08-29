@@ -128,6 +128,11 @@
  */
 #define MAX_SMS_OCTETS 140
 
+/*
+ * Default SMS concat re-assembly waiting time in seconds.
+ */
+#define SMS_COMBINE_TIMEOUT 1800
+
 /* Encode DCS using sms fields
  * mode = 0= encode using 00xxxxxx, 1= encode using 1111xxxx mode
  */

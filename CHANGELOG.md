@@ -2,6 +2,25 @@
 
 All notable changes to Kamex (formerly Kannel) will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- **`sms-combine-concatenated-mo` and its timeout can now be set per SMSC**,
+  falling back to the `core` value when omitted. Inbound fragmentation is a
+  property of the operator rather than of the gateway: a timeout long enough for
+  a slow route pins incomplete fragments from *every* route in memory for that
+  long, while a short one drops parts the slow route would have completed. Either
+  directive can be overridden on its own.
+
+  Adapted from a patch Stipe Tolj posted to the Kannel devel list in February
+  2016, which was never committed. It carries the resolved timeout in the
+  reassembly record so the periodic sweep can honour a per-connection deadline
+  without looking the connection up. One fix was needed: the patch read
+  `conn->handle_concatenated_mo` at a call site that is reached with no
+  connection at all — the NACK path passes NULL, as the guard on the line below
+  it shows — which would have dereferenced NULL on the first message. It now
+  falls back to the core values there.
+
 ## [1.9.0] - 2026-08-29
 
 ### Added

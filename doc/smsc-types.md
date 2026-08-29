@@ -241,6 +241,38 @@ validity-period = 4320          # Minutes (3 days)
 reconnect-delay = 10            # Seconds
 ```
 
+### Reassembling concatenated inbound messages
+
+A long inbound (MO) message arrives as several parts carrying a concatenation
+header. `sms-combine-concatenated-mo` decides whether Kamex holds the parts and
+hands the application one complete message, or passes each fragment straight
+through; `sms-combine-concatenated-mo-timeout` is how long an incomplete set
+waits for the rest before being discarded.
+
+Both are `core` settings, and both can now be overridden per connection:
+
+```ini
+group = core
+sms-combine-concatenated-mo = true
+sms-combine-concatenated-mo-timeout = 1800   # 30 minutes
+
+group = smsc
+smsc-id = domestic
+sms-combine-concatenated-mo-timeout = 60     # parts arrive in milliseconds
+
+group = smsc
+smsc-id = aggregator
+sms-combine-concatenated-mo = false          # already reassembled upstream
+```
+
+Either directive can be set on its own; whatever is omitted falls back to the
+`core` value. This matters because fragmentation behaviour belongs to the
+operator, not the gateway. Incomplete sets are held in memory, so a timeout
+generous enough for the slowest route pins fragments from every route for that
+long — while a timeout tight enough to keep memory small drops parts that a slow
+route would have completed. Per-connection values let each route use the timeout
+that suits it.
+
 ### Delivery reports across multiple binds
 
 When an operator is reached over more than one bind — a primary and a secondary

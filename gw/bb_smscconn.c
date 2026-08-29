@@ -159,9 +159,9 @@ static long sms_resend_retry;
 Counter *split_msg_counter;
 
 /* Flag for handling concatenated incoming messages. */
-static volatile sig_atomic_t handle_concatenated_mo;
+volatile sig_atomic_t handle_concatenated_mo;
 /* How long to wait for message parts */
-static long concatenated_mo_timeout;
+long concatenated_mo_timeout;
 /* Flag for return value of check_concat */
 enum {concat_error = -1, concat_complete = 0, concat_pending = 1, concat_none};
 
@@ -173,7 +173,7 @@ static long route_incoming_to_smsc(SMSCConn *conn, Msg *msg);
 static void concat_handling_init(void);
 static void concat_handling_shutdown(void);
 static void concat_handling_cleanup(void);
-static int concat_handling_check_and_handle(Msg **msg, Octstr *smscid);
+static int concat_handling_check_and_handle(Msg **msg, Octstr *smscid, long timeout);
 static void concat_handling_clear_old_parts(int force);
 
 /*---------------------------------------------------------------------------
@@ -595,8 +595,16 @@ long bb_smscconn_receive(SMSCConn *conn, Msg *sms)
     /* Before routing to some box or re-routing, do concatenation handling
      * and replace copy as such.
      */
-    if (handle_concatenated_mo && sms->sms.sms_type == mo) {
-        ret = concat_handling_check_and_handle(&sms, (conn ? conn->id : NULL));
+    /*
+     * conn may be NULL here - the NACK path a few hundred lines up calls this
+     * with no connection - so fall back to the core-group values rather than
+     * dereferencing it.
+     */
+    if ((conn != NULL ? conn->handle_concatenated_mo : handle_concatenated_mo)
+        && sms->sms.sms_type == mo) {
+        ret = concat_handling_check_and_handle(&sms, (conn ? conn->id : NULL),
+                conn != NULL ? conn->concatenated_mo_timeout
+                             : concatenated_mo_timeout);
         switch(ret) {
         case concat_pending:
             counter_increase(incoming_sms_counter); /* ?? */
@@ -897,10 +905,12 @@ int smsc2_start(Cfg *cfg)
         handle_concatenated_mo = 1; /* default is TRUE. */
 
     if (cfg_get_integer(&concatenated_mo_timeout, grp, octstr_imm("sms-combine-concatenated-mo-timeout")) == -1)
-        concatenated_mo_timeout = 1800;
+        concatenated_mo_timeout = SMS_COMBINE_TIMEOUT;
 
-    if (handle_concatenated_mo)
-        concat_handling_init();
+    /* Since we don't know if a SMSC specific value will be set in the
+     * following for loop via smscconn_create() we rather initialize
+     * the structures in any case and potentially don't use them. */
+    concat_handling_init();
 
     /* initialize low level PDUs */
     if (smpp_pdu_init(cfg) == -1)
@@ -2053,6 +2063,7 @@ typedef struct ConcatMsg {
     /* array of parts */
     Msg **parts;
     Octstr *smsc_id; /* name of smsc conn where we received this msgs */
+    long timeout; /* timeout in seconds */
 } ConcatMsg;
 
 static Dict *incoming_concat_msgs;
@@ -2134,7 +2145,7 @@ static void concat_handling_clear_old_parts(int force)
         mutex_lock(concat_lock);
         x = dict_get(incoming_concat_msgs, key);
         octstr_destroy(key);
-        if (x == NULL || (!force && difftime(time(NULL), x->trecv) < concatenated_mo_timeout)) {
+        if (x == NULL || (!force && difftime(time(NULL), x->trecv) < x->timeout)) {
             mutex_unlock(concat_lock);
             continue;
         }
@@ -2215,16 +2226,13 @@ static void concat_handling_clear_old_parts(int force)
  * - returns concat_pending (and sets *pmsg to NULL) if parts pending
  * - returns concat_error if store_save fails
  */
-static int concat_handling_check_and_handle(Msg **pmsg, Octstr *smscid)
+static int concat_handling_check_and_handle(Msg **pmsg, Octstr *smscid, long timeout)
 {
     Msg *msg = *pmsg;
     int l, iel = 0, refnum, pos, c, part, totalparts, i, sixteenbit;
     Octstr *udh = msg->sms.udhdata, *key;
     ConcatMsg *cmsg;
     int ret = concat_complete;
-
-    if (!handle_concatenated_mo)
-        return concat_none;
 
     /* ... module not initialised or there is no UDH or smscid is NULL. */
     if (incoming_concat_msgs == NULL || (l = octstr_len(udh)) == 0 || smscid == NULL)
@@ -2276,6 +2284,7 @@ static int concat_handling_check_and_handle(Msg **pmsg, Octstr *smscid)
         cmsg->key = octstr_duplicate(key);
         cmsg->ack = ack_success;
         cmsg->smsc_id = octstr_duplicate(smscid);
+        cmsg->timeout = timeout;
         cmsg->parts = gw_malloc(totalparts * sizeof(*cmsg->parts));
         memset(cmsg->parts, 0, cmsg->total_parts * sizeof(*cmsg->parts)); /* clear it. */
 

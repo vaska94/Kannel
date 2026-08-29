@@ -445,6 +445,8 @@ MULTI_GROUP(smsc,
     OCTSTR(generic-foreign-id-regex)
     OCTSTR(mobile-originated)
     OCTSTR(instances)
+    OCTSTR(sms-combine-concatenated-mo)
+    OCTSTR(sms-combine-concatenated-mo-timeout)
 )
 
 

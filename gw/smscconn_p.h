@@ -225,6 +225,10 @@ struct smscconn {
     Load *incoming_dlr_load;
     Load *outgoing_dlr_load;
 
+    /* MO concatenation re-assembly */
+    volatile sig_atomic_t handle_concatenated_mo;
+    long concatenated_mo_timeout;
+
     /* XXX: move rest global data from Smsc here
      */
 

@@ -73,6 +73,8 @@
 #include "sms.h"
 
 extern Counter *split_msg_counter;
+extern volatile sig_atomic_t handle_concatenated_mo;
+extern long concatenated_mo_timeout;
 
 /*
  * Some defaults
@@ -390,6 +392,19 @@ SMSCConn *smscconn_create(CfgGroup *grp, int start_as_stopped)
 
     if (cfg_get_bool(&conn->dead_start, grp, octstr_imm("dead-start")) == -1)
         conn->dead_start = 0;	/* default to connect at start-up time */
+
+    if (cfg_get_bool((int*)&conn->handle_concatenated_mo, grp, octstr_imm("sms-combine-concatenated-mo")) == -1)
+        conn->handle_concatenated_mo = handle_concatenated_mo;
+
+    if (cfg_get_integer(&conn->concatenated_mo_timeout, grp, octstr_imm("sms-combine-concatenated-mo-timeout")) == -1)
+        conn->concatenated_mo_timeout = concatenated_mo_timeout;
+
+    if (conn->handle_concatenated_mo != handle_concatenated_mo ||
+        conn->concatenated_mo_timeout != concatenated_mo_timeout)
+        info(0, "SMSC <%s> combines concatenated MO: %s, timeout %ld s",
+             octstr_get_cstr(conn->id),
+             conn->handle_concatenated_mo ? "yes" : "no",
+             conn->concatenated_mo_timeout);
 
     /* open a smsc-id specific log-file in exlusive mode */
     if (conn->log_file)
