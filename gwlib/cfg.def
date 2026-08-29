@@ -103,6 +103,7 @@ SINGLE_GROUP(core,
     OCTSTR(access-log-time)
     OCTSTR(access-log-format)
     OCTSTR(access-log-clean)
+    OCTSTR(access-log-utf8)
     OCTSTR(store-file)
     OCTSTR(store-dump-freq)
     OCTSTR(store-type)

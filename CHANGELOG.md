@@ -2,6 +2,37 @@
 
 All notable changes to Kamex (formerly Kannel) will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- **`access-log-utf8` in the `core` group** logs message bodies as readable
+  UTF-8 instead of hex or a row of dots. The access log renders bodies with
+  `isprint()`, so a Georgian or Cyrillic SMS became dots and a UCS-2 body became
+  hex; with this set, UCS-2 is converted to UTF-8 and text passes through a
+  UTF-8 aware printable filter. Binary bodies are still hex, and a failed
+  conversion falls back to hex rather than logging raw UTF-16BE, which begins
+  with a NUL for ASCII text and would truncate the field to nothing. Off by
+  default; the log is unchanged until it is set.
+
+  Control characters are filtered on this path, which the old `isprint()` route
+  also did — so a message body still cannot inject a line break into the log and
+  forge a record, nor pass terminal escape sequences to whoever tails it.
+
+  Inspired by a patch Stipe Tolj posted to the Kannel devel list in May 2023,
+  but not derived from it. That patch decoded to `wchar_t` and added an
+  unconditional process-wide `setlocale(LC_ALL, "")` in `octstr_init()`, which
+  would have applied to every Kamex process whether the feature was enabled or
+  not. On a host with a comma decimal separator that silently breaks the
+  Prometheus `/metrics` output, the JSON admin endpoints, and `throughput`
+  parsing — where `0.5` becomes `0.0`, and zero means *no limit*, so a
+  rate-limited SMSC would quietly become unthrottled. Its wide-character
+  accessor also returned string literals on two paths and heap memory on a
+  third, and the caller freed the result unconditionally: in the C locale that a
+  daemon actually runs in, a single inbound message containing one byte above
+  0x7F aborted bearerbox. This implementation stays in UTF-8 octets, touches no
+  locale, and filters control characters that the original passed through
+  untouched on the common text path.
+
 ## [1.9.1] - 2026-08-29
 
 ### Added

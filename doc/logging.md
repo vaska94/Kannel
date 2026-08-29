@@ -73,6 +73,40 @@ Returns `warn` status (HTTP 200) when:
 
 Note: Log levels are inverted from common convention (0 = most verbose).
 
+## Non-Latin Text in the Access Log
+
+By default the access log renders a message body with `isprint()`, so every byte
+above 0x7F becomes a dot — a Georgian or Cyrillic SMS is logged as a row of
+dots, and a UCS-2 body is logged as hex. Set `access-log-utf8` in the `core`
+group to log readable text instead:
+
+```ini
+group = core
+access-log = /var/log/kamex/access.log
+access-log-utf8 = true
+```
+
+With it enabled:
+
+- **UCS-2** bodies are converted to UTF-8. If the conversion fails the body is
+  logged as hex, as before, rather than raw — unconverted UTF-16BE begins with a
+  NUL byte for ASCII text, which would truncate the field and silently lose the
+  message.
+- **Text** bodies pass through a UTF-8 aware filter: valid multi-byte sequences
+  are kept, while control characters, malformed sequences, overlong forms and
+  surrogates each become a dot.
+- **Binary** (`coding = 1`) bodies are still logged as hex. Binary is binary.
+
+Control characters are always filtered, so a message body cannot inject a line
+break — and therefore cannot forge an access-log record — nor smuggle terminal
+escape sequences to whoever is tailing the log.
+
+The filter decodes UTF-8 directly and does not consult the locale, so it behaves
+the same for a gateway started by systemd with no `LANG` as for one started from
+an interactive shell. Nothing in Kamex calls `setlocale()`.
+
+Leave the setting off and the access log is byte-for-byte what it always was.
+
 ## Structured JSON Logging
 
 Enable JSON format for structured logging, log aggregation (ELK, Loki, etc.), and machine parsing:

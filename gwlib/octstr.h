@@ -311,6 +311,12 @@ void octstr_convert_range(Octstr *ostr, long pos, long len,
  */
 void octstr_convert_printable(Octstr *ostr);
 
+/*
+ * Like octstr_convert_printable(), but aware of UTF-8: valid multi-byte
+ * sequences are kept, everything else becomes a dot. Locale independent.
+ */
+void octstr_convert_printable_utf8(Octstr *ostr);
+
 
 /*
  * Compare two octet strings, returning 0 if they are equal, negative if
