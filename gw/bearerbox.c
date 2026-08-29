@@ -408,6 +408,13 @@ static Cfg *init_bearerbox(Cfg *cfg)
     /* should predefined markers be used, ie. prefixing timestamp */
     cfg_get_bool(&m, grp, octstr_imm("access-log-clean"));
 
+    /* log message bodies as UTF-8 rather than hex? */
+    {
+        int utf8 = 0;
+        cfg_get_bool(&utf8, grp, octstr_imm("access-log-utf8"));
+        bb_alog_set_utf8(utf8);
+    }
+
     /* custom access-log format  */
     if ((log = cfg_get(grp, octstr_imm("access-log-format"))) != NULL) {
         bb_alog_init(log);

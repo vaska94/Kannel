@@ -69,6 +69,48 @@
 
 static Octstr *custom_log_format = NULL;
 
+/* Log message bodies as UTF-8 rather than hex; see access-log-utf8. */
+static int log_utf8 = 0;
+
+
+/*
+ * Render a message body for the access log.
+ *
+ * Binary stays hex either way. With access-log-utf8 set, a UCS-2 body is
+ * converted to UTF-8 and text bodies go through the UTF-8 aware printable
+ * filter, so Cyrillic, Georgian and the like stay readable instead of being
+ * dumped as hex. A failed conversion falls back to hex rather than logging the
+ * body raw: unconverted UTF-16BE starts with a NUL byte for ASCII text, which
+ * would truncate the field to nothing and silently lose the message.
+ *
+ * With the setting off this is exactly what the log did before.
+ */
+static void alog_prepare_text(const Msg *msg, Octstr *text)
+{
+    if (msg->sms.coding == DC_8BIT) {
+        octstr_binary_to_hex(text, 1);
+        return;
+    }
+
+    if (!log_utf8) {
+        if (msg->sms.coding == DC_UCS2)
+            octstr_binary_to_hex(text, 1);
+        else
+            octstr_convert_printable(text);
+        return;
+    }
+
+    if (msg->sms.coding == DC_UCS2 &&
+        charset_convert(text, "UTF-16BE", "UTF-8") < 0) {
+        warning(0, "access-log: cannot convert UCS-2 body to UTF-8, "
+                   "logging it as hex.");
+        octstr_binary_to_hex(text, 1);
+        return;
+    }
+
+    octstr_convert_printable_utf8(text);
+}
+
 
 /********************************************************************
  * Routine to escape the values into the custom log format.
@@ -128,10 +170,7 @@ static Octstr *get_pattern(SMSCConn *conn, Msg *msg, const char *message)
  
     text = msg->sms.msgdata ? octstr_duplicate(msg->sms.msgdata) : octstr_create("");
     udh = msg->sms.udhdata ? octstr_duplicate(msg->sms.udhdata) : octstr_create("");
-    if ((msg->sms.coding == DC_8BIT || msg->sms.coding == DC_UCS2))
-        octstr_binary_to_hex(text, 1);
-    else
-        octstr_convert_printable(text);
+    alog_prepare_text(msg, text);
     octstr_binary_to_hex(udh, 1);
 
     if (octstr_len(text)) {
@@ -364,6 +403,12 @@ void bb_alog_init(const Octstr *format)
 }
 
 
+void bb_alog_set_utf8(int utf8)
+{
+    log_utf8 = utf8;
+}
+
+
 void bb_alog_shutdown(void)
 {
     octstr_destroy(custom_log_format);
@@ -395,10 +440,7 @@ void bb_alog_sms(SMSCConn *conn, Msg *msg, const char *message)
         else
             cid = octstr_imm("");
 
-        if ((msg->sms.coding == DC_8BIT || msg->sms.coding == DC_UCS2))
-            octstr_binary_to_hex(text, 1);
-        else
-            octstr_convert_printable(text);
+        alog_prepare_text(msg, text);
         octstr_binary_to_hex(udh, 1);
 
         alog("%s [SMSC:%s] [SVC:%s] [ACT:%s] [BINF:%s] [FID:%s] [META:%s] [from:%s] [to:%s] [flags:%ld:%ld:%ld:%ld:%ld] "

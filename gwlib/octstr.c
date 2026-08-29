@@ -867,6 +867,89 @@ void octstr_convert_printable(Octstr *ostr)
 }
 
 
+/*
+ * Length of the UTF-8 sequence introduced by this byte, or 0 if the byte
+ * cannot start one. Rejects the 0xC0/0xC1 overlong two-byte forms and
+ * anything above 0xF4, which cannot encode a valid code point.
+ */
+static int utf8_seq_len(unsigned char c)
+{
+    if (c < 0x80)
+        return 1;
+    if (c >= 0xC2 && c <= 0xDF)
+        return 2;
+    if (c >= 0xE0 && c <= 0xEF)
+        return 3;
+    if (c >= 0xF0 && c <= 0xF4)
+        return 4;
+    return 0;
+}
+
+
+/*
+ * Replace anything that is not a printable UTF-8 character with a dot,
+ * keeping valid multi-byte sequences intact.
+ *
+ * Deliberately decodes UTF-8 by hand rather than leaning on iswprint() and a
+ * locale: a gateway started by init has no LANG, so a locale-driven filter
+ * either rejects every non-ASCII byte or forces a process-wide setlocale()
+ * whose effect on printf and strtod reaches far beyond logging.
+ *
+ * Overlong forms, surrogates, out-of-range code points and truncated
+ * sequences are each replaced byte by byte, so malformed input can never
+ * smuggle a control character through as part of a sequence.
+ */
+void octstr_convert_printable_utf8(Octstr *ostr)
+{
+    long pos, i;
+    int seq, ok;
+    unsigned long cp;
+    unsigned char c;
+
+    seems_valid(ostr);
+    gw_assert(!ostr->immutable);
+
+    pos = 0;
+    while (pos < ostr->len) {
+        c = ostr->data[pos];
+        seq = utf8_seq_len(c);
+
+        if (seq <= 1) {
+            /* ASCII, or a byte that cannot begin a sequence. */
+            ostr->data[pos] = (c >= 0x20 && c < 0x7F) ? c : '.';
+            pos++;
+            continue;
+        }
+
+        /* Enough bytes left, and all continuations? */
+        ok = (pos + seq <= ostr->len);
+        cp = c & (0xFF >> (seq + 1));
+        for (i = 1; ok && i < seq; i++) {
+            unsigned char cc = ostr->data[pos + i];
+            if ((cc & 0xC0) != 0x80)
+                ok = 0;
+            else
+                cp = (cp << 6) | (cc & 0x3F);
+        }
+
+        if (ok) {
+            /* Overlong, surrogate, out of range, or a C1 control. */
+            if ((seq == 3 && cp < 0x800) || (seq == 4 && cp < 0x10000) ||
+                (cp >= 0xD800 && cp <= 0xDFFF) || cp > 0x10FFFF ||
+                (cp >= 0x80 && cp <= 0x9F))
+                ok = 0;
+        }
+
+        if (ok) {
+            pos += seq;                 /* keep the whole sequence */
+        } else {
+            ostr->data[pos] = '.';      /* one dot per bad byte */
+            pos++;
+        }
+    }
+}
+
+
 
 int octstr_compare(const Octstr *ostr1, const Octstr *ostr2)
 {

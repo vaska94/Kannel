@@ -179,6 +179,9 @@ void httpadmin_stop(void);
 /* passes the access-log-format string from config to the module */
 void bb_alog_init(const Octstr *format);
 
+/* Log SMS bodies as UTF-8 instead of hex (access-log-utf8). */
+void bb_alog_set_utf8(int utf8);
+
 /* cleanup for internal things */
 void bb_alog_shutdown(void);
 
