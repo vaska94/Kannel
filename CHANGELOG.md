@@ -2,7 +2,7 @@
 
 All notable changes to Kamex (formerly Kannel) will be documented in this file.
 
-## [Unreleased]
+## [1.8.10] - 2026-08-29
 
 ### Added
 - **`throughput-mt` and `throughput-mo` in the `smsc` group**, splitting the

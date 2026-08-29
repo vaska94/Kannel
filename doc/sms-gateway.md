@@ -424,7 +424,9 @@ log-level = 1
 group = smsc
 smsc = smpp
 smsc-id = smpp1
-throughput = 100                # Max 100 msg/sec to this SMSC
+throughput = 100                # Max 100 msg/sec, both directions
+throughput-mt = 100             # Or limit each direction separately:
+throughput-mo = 40              # MT to the SMSC, MO from it
 ```
 
 ### Connection Pooling

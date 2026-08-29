@@ -227,7 +227,9 @@ allowed-prefix = "358;46"
 denied-prefix = "1900"
 
 # Throughput control
-throughput = 50                 # Messages per second
+throughput = 50                 # Messages per second, both directions
+throughput-mt = 50              # Only messages sent to the SMSC
+throughput-mo = 20              # Only messages received from the SMSC
 
 # Character set
 alt-charset = "UTF-8"
@@ -238,6 +240,26 @@ validity-period = 4320          # Minutes (3 days)
 # Reconnection
 reconnect-delay = 10            # Seconds
 ```
+
+### Rate limiting
+
+`throughput` caps messages per second in **both** directions. To set the two
+independently, use `throughput-mt` for messages sent to the SMSC and
+`throughput-mo` for messages received from it — MO traffic and delivery
+receipts. Either overrides `throughput` for its direction; omitting a value
+leaves that direction unlimited.
+
+```ini
+throughput-mt = 50              # do not submit faster than the operator allows
+throughput-mo = 20              # do not accept inbound faster than we can process
+```
+
+Limiting MO is useful when an SMSC can deliver faster than the downstream
+application or DLR storage can keep up. On reaching the MO limit the SMPP driver
+answers `deliver_sm` and `data_sm` with `ESME_RTHROTTLED`, which a well-behaved
+SMSC treats as "slow down and retry" rather than as a permanent failure — so
+messages are deferred, not lost. Set it above your sustained inbound rate;
+throttling every message will make an SMSC log errors and may count against you.
 
 ## Multiple SMSCs
 
