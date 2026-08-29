@@ -174,6 +174,13 @@ struct smscconn {
     Octstr *id;			/* Abstract name specified in configuration and
 				   used for logging and routing */
     Octstr *admin_id;
+    /*
+     * Identity under which delivery reports are stored and looked up.
+     * Defaults to id. Several connections may share one, so that a receipt
+     * arriving on a sibling bind still finds the message that another bind
+     * submitted -- see the dlr-smsc-id directive.
+     */
+    Octstr *dlr_id;
     List *allowed_smsc_id;
     List *denied_smsc_id;
     List *preferred_smsc_id;

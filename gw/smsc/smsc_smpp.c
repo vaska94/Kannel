@@ -1670,7 +1670,7 @@ static Msg *handle_dlr(SMPP *smpp, Octstr *destination_addr, Octstr *short_messa
             }
         }
 
-        dlrmsg = dlr_find(smpp->conn->id,
+        dlrmsg = dlr_find(smpp->conn->dlr_id,
             tmp, /* smsc message id */
             destination_addr, /* destination */
             dlrstat, 0);
@@ -2035,7 +2035,7 @@ static int handle_pdu(SMPP *smpp, Connection *conn, SMPP_PDU *pdu,
                  * order to get it logged to access-log.
                  */
                 if (DLR_IS_ENABLED_DEVICE(msg->sms.dlr_mask)) {
-                    dlr_add(smpp->conn->id, tmp, msg, 0);
+                    dlr_add(smpp->conn->dlr_id, tmp, msg, 0);
                     octstr_destroy(tmp);
                 } else {
                     octstr_destroy(msg->sms.foreign_id);

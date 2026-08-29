@@ -848,19 +848,19 @@ static int handle_operation(SMSCConn *conn, Connection *server,
 	switch(st_code)
 	{
 	case 0: /* delivered */
-		msg = dlr_find((conn->id ? conn->id : privdata->name),
+		msg = dlr_find((conn->dlr_id ? conn->dlr_id : privdata->name),
 			emimsg->fields[E50_SCTS], /* timestamp */
 			emimsg->fields[E50_OADC], /* destination */
 			DLR_SUCCESS, 1);
 		break;
 	case 1: /* buffered */
-		msg = dlr_find((conn->id ? conn->id : privdata->name),
+		msg = dlr_find((conn->dlr_id ? conn->dlr_id : privdata->name),
 			emimsg->fields[E50_SCTS], /* timestamp */
 			emimsg->fields[E50_OADC], /* destination */
 			DLR_BUFFERED, 1);
 		break;
 	case 2: /* not delivered */
-		msg = dlr_find((conn->id ? conn->id : privdata->name),
+		msg = dlr_find((conn->dlr_id ? conn->dlr_id : privdata->name),
 			emimsg->fields[E50_SCTS], /* timestamp */
 			emimsg->fields[E50_OADC], /* destination */
 			DLR_FAIL, 1);
@@ -1113,7 +1113,7 @@ static int emi2_handle_smscreq(SMSCConn *conn, Connection *server)
 				    info(0,"EMI2[%s]: uhhh m is NULL, very bad",
 					 octstr_get_cstr(privdata->name));
 				} else if (DLR_IS_ENABLED_DEVICE(m->sms.dlr_mask)) {
-				    dlr_add((conn->id ? conn->id : privdata->name), ts, m, 1);
+				    dlr_add((conn->dlr_id ? conn->dlr_id : privdata->name), ts, m, 1);
 				}
 				octstr_destroy(ts);
 				octstr_destroy(adc);

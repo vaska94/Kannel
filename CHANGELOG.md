@@ -2,6 +2,31 @@
 
 All notable changes to Kamex (formerly Kannel) will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- **`dlr-smsc-id` in the `smsc` group**, letting several connections share one
+  delivery-report namespace. When an operator is reached over more than one bind
+  — a primary and a secondary on different hosts or ports — a message submitted
+  on one bind can have its receipt returned on another. Receipts are stored and
+  found under the connection's `smsc-id`, so one arriving on a sibling bind
+  matched nothing and was dropped, leaving only a `DLR ... not found` warning.
+
+  Give the siblings a shared `dlr-smsc-id` and their receipts go in one
+  namespace, while `smsc-id` stays distinct for routing, logging and status.
+  Omitted, a connection uses its own `smsc-id` exactly as before. Applies to the
+  SMPP, EMI, AT, fake and loopback drivers.
+
+  The problem was reported to the Kannel devel list in June 2019 by an engineer
+  at Vodafone Automotive, running it in production at the time. The patch he
+  posted took a different route — storing receipts under `conn->name` and
+  redefining that name to drop host and port — which was not adopted here:
+  `conn->name` is also the fallback `smsc-id` for connections that do not set
+  one, and collapsing it would have silently changed their identity and made any
+  two connections sharing an `smsc-username` match each other's receipts. An
+  explicit directive was the design he himself argued for when the patch was
+  reviewed; that discussion never concluded and upstream has not moved since.
+
 ## [1.8.11] - 2026-08-29
 
 ### Fixed

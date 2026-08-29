@@ -241,6 +241,37 @@ validity-period = 4320          # Minutes (3 days)
 reconnect-delay = 10            # Seconds
 ```
 
+### Delivery reports across multiple binds
+
+When an operator is reached over more than one bind — a primary and a secondary
+on different hosts or ports — a message submitted on one bind may have its
+delivery receipt returned on another. Receipts are stored and looked up under
+the `smsc-id` of the connection, so a receipt arriving on a sibling bind finds
+nothing and is dropped, with only a `DLR ... not found` warning to show for it.
+
+Give the sibling connections a shared `dlr-smsc-id` to put their receipts in one
+namespace, while keeping distinct `smsc-id` values for routing, logging and
+status:
+
+```ini
+group = smsc
+smsc = smpp
+smsc-id = operator-primary
+host = 10.0.0.1
+dlr-smsc-id = operator            # shared
+
+group = smsc
+smsc = smpp
+smsc-id = operator-secondary
+host = 10.0.0.2
+dlr-smsc-id = operator            # shared
+```
+
+Omit it and a connection stores receipts under its own `smsc-id`, exactly as
+before. Only give the same value to binds that genuinely reach the same
+operator: connections sharing a namespace can match each other's receipts, so
+unrelated SMSCs must not share one.
+
 ### Rate limiting
 
 `throughput` caps messages per second in **both** directions. To set the two
