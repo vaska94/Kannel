@@ -2,7 +2,7 @@
 
 All notable changes to Kamex (formerly Kannel) will be documented in this file.
 
-## [Unreleased]
+## [1.9.0] - 2026-08-29
 
 ### Added
 - **`dlr-smsc-id` in the `smsc` group**, letting several connections share one
