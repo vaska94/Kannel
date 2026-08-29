@@ -164,6 +164,12 @@ static void httpsmsc_receiver(void *arg)
     HTTPClient *client;
     Octstr *ip, *url, *body;
     List *headers, *cgivars;
+    double delay = 0;
+
+    /* throughput delay, if configured */
+    if (conn->throughput_mo > 0) {
+        delay = 1.0 / conn->throughput_mo;
+    }
 
     /* Make sure we log into our own log-file if defined */
     log_thread_to(conn->log_idx);
@@ -188,13 +194,19 @@ static void httpsmsc_receiver(void *arg)
         debug("smsc.http", 0, "HTTP[%s]: Got request `%s'",
               octstr_get_cstr(conn->id), octstr_get_cstr(url));
 
+        /* obey throughput speed limit, if any */
+        if (conn->throughput_mo > 0) {
+            gwthread_sleep(delay);
+        }
+
         if (connect_denied(conndata->allow_ip, ip)) {
             info(0, "HTTP[%s]: Connection `%s' tried from denied "
                     "host %s, ignored", octstr_get_cstr(conn->id),
                     octstr_get_cstr(url), octstr_get_cstr(ip));
             http_close_client(client);
-        } else
+        } else {
             conndata->callbacks->receive_sms(conn, client, headers, body, cgivars);
+        }
 
         debug("smsc.http", 0, "HTTP[%s]: Destroying client information",
               octstr_get_cstr(conn->id));
@@ -248,8 +260,8 @@ static void httpsmsc_sender(void *arg)
     /* Make sure we log into our own log-file if defined */
     log_thread_to(conn->log_idx);
 
-    if (conn->throughput) {
-        delay = 1.0 / conn->throughput;
+    if (conn->throughput_mt) {
+        delay = 1.0 / conn->throughput_mt;
     }
 
     while (conndata->shutdown == 0) {
@@ -268,7 +280,7 @@ static void httpsmsc_sender(void *arg)
             break;
 
         /* obey throughput speed limit, if any */
-        if (conn->throughput > 0) {
+        if (conn->throughput_mt > 0) {
             gwthread_sleep(delay);
         }
         counter_increase(conndata->open_sends);

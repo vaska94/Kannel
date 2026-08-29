@@ -336,10 +336,27 @@ SMSCConn *smscconn_create(CfgGroup *grp, int start_as_stopped)
             panic(0, "Could not compile pattern '%s'", octstr_get_cstr(preferred_prefix_regex));
 
     if ((tmp = cfg_get(grp, octstr_imm("throughput"))) != NULL) {
-        if (octstr_parse_double(&conn->throughput, tmp, 0) == -1)
-            conn->throughput = 0;
+        if (octstr_parse_double(&conn->throughput_mt, tmp, 0) == -1) {
+            conn->throughput_mt = conn->throughput_mo = 0;
+        } else {
+            conn->throughput_mo = conn->throughput_mt;
+        }
         octstr_destroy(tmp);
-        info(0, "Set throughput to %.3f for smsc id <%s>", conn->throughput, octstr_get_cstr(conn->id));
+        info(0, "Set MT/MO throughput to %.3f for smsc id <%s>", conn->throughput_mt, octstr_get_cstr(conn->id));
+    }
+    else {
+        if ((tmp = cfg_get(grp, octstr_imm("throughput-mt"))) != NULL) {
+            if (octstr_parse_double(&conn->throughput_mt, tmp, 0) == -1)
+                conn->throughput_mt = 0;
+            octstr_destroy(tmp);
+            info(0, "Set MT throughput to %.3f for smsc id <%s>", conn->throughput_mt, octstr_get_cstr(conn->id));
+        }
+        if ((tmp = cfg_get(grp, octstr_imm("throughput-mo"))) != NULL) {
+             if (octstr_parse_double(&conn->throughput_mo, tmp, 0) == -1)
+                 conn->throughput_mo = 0;
+             octstr_destroy(tmp);
+             info(0, "Set MO throughput to %.3f for smsc id <%s>", conn->throughput_mo, octstr_get_cstr(conn->id));
+        }
     }
     /* Sets the admin_id. Equals to connection id if empty */
     GET_OPTIONAL_VAL(conn->admin_id, "smsc-admin-id");

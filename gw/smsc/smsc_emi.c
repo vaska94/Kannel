@@ -1008,8 +1008,8 @@ static int emi2_do_send(SMSCConn *conn, Connection *server)
     Msg *msg;
     double delay = 0;
 
-    if (conn->throughput > 0) {
-        delay = 1.0 / conn->throughput;
+    if (conn->throughput_mt > 0) {
+        delay = 1.0 / conn->throughput_mt;
     }
     
     /* Send messages if there's room in the sending window */
@@ -1017,7 +1017,7 @@ static int emi2_do_send(SMSCConn *conn, Connection *server)
            (msg = gw_prioqueue_remove(PRIVDATA(conn)->outgoing_queue)) != NULL) {
         int nexttrn = emi2_next_trn(conn);
 
-        if (conn->throughput > 0)
+        if (conn->throughput_mt > 0)
             gwthread_sleep(delay);
 
         /* convert the generic Kannel message into an EMI type message */
