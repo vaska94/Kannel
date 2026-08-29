@@ -2,7 +2,7 @@
 
 All notable changes to Kamex (formerly Kannel) will be documented in this file.
 
-## [Unreleased]
+## [1.9.4] - 2026-08-29
 
 ### Fixed
 - **Bearerbox started with no admin interface when the admin port could not be
