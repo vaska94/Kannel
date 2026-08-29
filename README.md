@@ -1,6 +1,6 @@
 # Kamex SMS Gateway
 
-[![Version](https://img.shields.io/badge/version-1.9.1-blue.svg)](https://github.com/vaska94/Kamex/releases)
+[![Version](https://img.shields.io/badge/version-1.9.2-blue.svg)](https://github.com/vaska94/Kamex/releases)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Linux-lightgrey.svg)]()
 [![Docker](https://img.shields.io/badge/docker-ghcr.io-blue.svg)](https://ghcr.io/vaska94/kamex)
@@ -16,6 +16,7 @@ Modern, high-performance SMS gateway with built-in admin panel. Supports SMPP, E
 - **Prometheus Metrics** - Native `/metrics` endpoint for Prometheus/Grafana monitoring
 - **Async Logging** - Non-blocking logging with dedicated writer thread (~10x throughput)
 - **JSON Logs** - Structured JSON logging for ELK, Loki, Splunk integration
+- **UTF-8 Access Log** - Log Cyrillic, Georgian and other non-Latin message bodies readably instead of as hex
 - **Web Admin Panel** - Built-in dashboard at `/` with real-time monitoring
 - **JSON API** - Modern `/status.json` and `/api/sendsms` endpoints
 - **Health Checks** - `/health` endpoint for load balancers and Kubernetes

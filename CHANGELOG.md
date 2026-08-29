@@ -2,7 +2,7 @@
 
 All notable changes to Kamex (formerly Kannel) will be documented in this file.
 
-## [Unreleased]
+## [1.9.2] - 2026-08-29
 
 ### Added
 - **`access-log-utf8` in the `core` group** logs message bodies as readable

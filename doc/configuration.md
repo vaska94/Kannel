@@ -53,6 +53,7 @@ smsbox-port = 13001              # Port for smsbox connections
 log-file = /var/log/kannel/bearerbox.log
 log-level = 0                    # 0=debug, 1=info, 2=warning, 3=error, 4=panic
 access-log = /var/log/kannel/access.log
+access-log-utf8 = true         # log message bodies as UTF-8, not hex/dots
 
 # IP access control
 admin-deny-ip = "*.*.*.*"
@@ -112,6 +113,7 @@ a non-production bearerbox first.
 | `log-file` | path | Log file location |
 | `log-level` | 0-4 | Logging verbosity |
 | `access-log` | path | HTTP access log |
+| `access-log-utf8` | bool | Log message bodies as readable UTF-8 (default `false`) |
 | `store-file` | path | Message store file |
 | `store-type` | string | `file`, `redis`, `mysql`, etc. |
 | `unified-prefix` | string | Number normalization rules |

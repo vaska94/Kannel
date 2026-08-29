@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 
 Name:           kamex
-Version:        1.9.1
+Version:        1.9.2
 Release:        1%{?dist}
 Summary:        High-performance SMS gateway (Kannel fork)
 License:        MIT and Kannel
