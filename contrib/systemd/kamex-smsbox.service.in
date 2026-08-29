@@ -6,7 +6,12 @@ Documentation=https://kamex.dev
 
 [Service]
 Type=simple
+# Reject a config that cannot start, before the daemon is launched.
+# Does not catch listen/bind failures - those fail at start-up.
+ExecStartPre=@SBINDIR@/smsbox -t /etc/kamex/kamex.conf
 ExecStart=@SBINDIR@/smsbox -v 1 /etc/kamex/kamex.conf
+StandardOutput=journal
+StandardError=journal
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=always
 RestartSec=5
@@ -24,8 +29,12 @@ LogsDirectory=kamex
 LogsDirectoryMode=0755
 
 # Security hardening (requires namespace support)
+# ProtectSystem=yes makes /usr and /boot read-only. "strict" additionally
+# remounts almost the whole filesystem read-only, which has been reported to
+# stop the service starting on some distributions; ReadWritePaths below only
+# re-opens the paths we know about.
 NoNewPrivileges=true
-ProtectSystem=strict
+ProtectSystem=yes
 ProtectHome=true
 ReadWritePaths=/var/log/kamex /var/spool/kamex /var/run/kamex
 

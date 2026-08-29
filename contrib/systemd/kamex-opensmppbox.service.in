@@ -22,7 +22,7 @@ LogsDirectoryMode=0755
 
 # Security hardening
 NoNewPrivileges=true
-ProtectSystem=strict
+ProtectSystem=yes
 ProtectHome=true
 ReadWritePaths=/var/log/kamex /var/spool/kamex /var/run/kamex
 PrivateTmp=true

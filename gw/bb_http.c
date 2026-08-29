@@ -684,7 +684,16 @@ int httpadmin_start(Cfg *cfg)
     octstr_destroy(ssl_server_key_file);
 #endif /* HAVE_LIBSSL */
 
-    http_open_port_if(ha_port, ssl, ha_interface);
+    /*
+     * The return value matters: without it a port already in use, an
+     * admin-interface that does not resolve, or a privileged port without the
+     * capability to bind it left the gateway running with no admin interface
+     * at all -- no /health, no /metrics, no way to shut it down -- while
+     * cheerfully logging that the admin panel was available.
+     */
+    if (http_open_port_if(ha_port, ssl, ha_interface) == -1)
+        panic(0, "Failed to open HTTP admin port %ld: port in use, "
+                 "admin-interface unusable, or permission denied.", ha_port);
 
     info(0, "Admin panel available at / and /admin");
 
