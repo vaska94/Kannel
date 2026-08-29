@@ -2,6 +2,35 @@
 
 All notable changes to Kamex (formerly Kannel) will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- **Bearerbox started with no admin interface when the admin port could not be
+  bound.** `httpadmin_start()` discarded the return value of
+  `http_open_port_if()`, so a port already in use, an `admin-interface` that
+  does not resolve, or a privileged port without permission left the gateway
+  running with no admin port, no `/health` and no `/metrics` — while logging
+  "Admin panel available at / and /admin". Binding the admin port is now fatal,
+  with a message naming the likely causes.
+
+### Changed
+- **systemd: `ProtectSystem` relaxed from `strict` to `yes`.** `strict` remounts
+  almost the entire filesystem read-only and has been reported to stop the
+  service starting; `yes` keeps `/usr` and `/boot` read-only, and the existing
+  `ReadWritePaths` still scopes what the daemon may write.
+- **systemd: the config is validated before the daemon starts.** The bearerbox
+  and smsbox units gained `ExecStartPre=... -t /etc/kamex/kamex.conf`, so a
+  configuration that cannot start fails the unit with a clear reason instead of
+  a restart loop. Since 1.8.5 that check applies the same mandatory-group rules
+  as start-up, so it catches more than syntax. It cannot catch a port that is
+  already bound — the fix above covers that.
+- **systemd: units log to the journal** (`StandardOutput`/`StandardError`), so
+  `journalctl -u kamex-bearerbox` shows start-up failures that previously went
+  nowhere.
+
+  These three came from reviewing the omaxdevelop/kamex fork, which is a copy of
+  1.8.3 that had hit them in deployment.
+
 ## [1.9.3] - 2026-08-29
 
 ### Fixed
