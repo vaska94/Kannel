@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 
 Name:           kamex-opensmppbox
-Version:        1.9.0
+Version:        1.9.1
 Release:        1%{?dist}
 Summary:        SMPP proxy box for Kamex SMS gateway
 License:        MIT and Kannel

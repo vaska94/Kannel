@@ -2,7 +2,7 @@
 
 All notable changes to Kamex (formerly Kannel) will be documented in this file.
 
-## [Unreleased]
+## [1.9.1] - 2026-08-29
 
 ### Added
 - **`sms-combine-concatenated-mo` and its timeout can now be set per SMSC**,
