@@ -347,13 +347,58 @@ Octstr *urltrans_fill_escape_codes(Octstr *pattern, Msg *request)
 
 
 /*
- * Helper macro for escape encoding based on type.
- * For shell escaping, we wrap values in single quotes for safety.
+ * Shell quoting that already surrounds an escape code in the operator's
+ * pattern. Wrapping a value in single quotes only protects it in bare text:
+ * inside "..." the quotes are ordinary characters and $(...), backticks and
+ * ${...} in the value still expand, so `exec = "handler \"%S\""` would run
+ * whatever the message body asked for. Track the pattern's own quoting and
+ * escape each value for the context it actually lands in.
+ */
+enum {
+    SHELL_BARE = 0,
+    SHELL_SQUOTE,
+    SHELL_DQUOTE
+};
+
+/* Nesting depth for $(...) and `...`; deeper than this does not occur in a
+ * sane pattern, and refusing to nest further only keeps the outer context. */
+#define SHELL_CTX_MAX 16
+
+static void shell_escape_in_context(Octstr *ostr, int ctx)
+{
+    if (ostr == NULL)
+        return;
+
+    switch (ctx) {
+    case SHELL_SQUOTE:
+        /* Close the operator's quote, emit an escaped one, reopen it. */
+        octstr_replace(ostr, octstr_imm("'"), octstr_imm("'\\''"));
+        break;
+
+    case SHELL_DQUOTE:
+        /* Backslashes first, or they would double the ones added below. */
+        octstr_replace(ostr, octstr_imm("\\"), octstr_imm("\\\\"));
+        octstr_replace(ostr, octstr_imm("`"), octstr_imm("\\`"));
+        octstr_replace(ostr, octstr_imm("$"), octstr_imm("\\$"));
+        octstr_replace(ostr, octstr_imm("\""), octstr_imm("\\\""));
+        break;
+
+    default:
+        octstr_shell_escape(ostr);
+        break;
+    }
+}
+
+
+/*
+ * Helper macro for escape encoding based on type. Shell escaping reads the
+ * quoting context tracked by the caller's scan of the pattern, the same way
+ * this already reads `escape_type` from the enclosing scope.
  */
 #define DO_ESCAPE(ostr, escape_type) \
     do { \
         if ((escape_type) == URLTRANS_ESCAPE_SHELL) \
-            octstr_shell_escape(ostr); \
+            shell_escape_in_context(ostr, ctx_quote[ctx_depth]); \
         else \
             octstr_url_encode(ostr); \
     } while (0)
@@ -373,8 +418,15 @@ Octstr *urltrans_fill_escape_codes_ex(Octstr *pattern, Msg *request, int escape_
     int c;
     long i, k;
     Octstr *temp;
+    int ctx_quote[SHELL_CTX_MAX];    /* quoting state of each nested command */
+    int ctx_opener[SHELL_CTX_MAX];   /* what opened the frame: 0, '(' or '`' */
+    int ctx_depth = 0;
+    int q, next;
 
     result = octstr_create("");
+
+    ctx_quote[0] = SHELL_BARE;
+    ctx_opener[0] = 0;
 
     if (request->sms.msgdata) {
         word_list = octstr_split_words(request->sms.msgdata);
@@ -394,6 +446,59 @@ Octstr *urltrans_fill_escape_codes_ex(Octstr *pattern, Msg *request, int escape_
                 break;
             octstr_append_char(result, c);
             ++pos;
+
+            if (escape_type != URLTRANS_ESCAPE_SHELL)
+                continue;
+
+            /* Follow the quoting of the pattern itself, so that the values
+             * substituted below can be escaped for where they land. */
+            q = ctx_quote[ctx_depth];
+            next = (pos < pattern_len) ? octstr_get_char(pattern, pos) : -1;
+
+            if (q == SHELL_SQUOTE) {
+                /* Nothing is special between single quotes but the quote. */
+                if (c == '\'')
+                    ctx_quote[ctx_depth] = SHELL_BARE;
+                continue;
+            }
+
+            if (c == '\\' && next >= 0) {
+                /* Quotes the next character, in bare text and in "..." both. */
+                octstr_append_char(result, next);
+                ++pos;
+                continue;
+            }
+            if (c == '$' && next == '(') {
+                octstr_append_char(result, next);
+                ++pos;
+                if (ctx_depth + 1 < SHELL_CTX_MAX) {
+                    ++ctx_depth;
+                    ctx_quote[ctx_depth] = SHELL_BARE;
+                    ctx_opener[ctx_depth] = '(';
+                }
+                continue;
+            }
+            if (c == '`') {
+                if (ctx_opener[ctx_depth] == '`')
+                    --ctx_depth;
+                else if (ctx_depth + 1 < SHELL_CTX_MAX) {
+                    ++ctx_depth;
+                    ctx_quote[ctx_depth] = SHELL_BARE;
+                    ctx_opener[ctx_depth] = '`';
+                }
+                continue;
+            }
+
+            if (q == SHELL_DQUOTE) {
+                if (c == '"')
+                    ctx_quote[ctx_depth] = SHELL_BARE;
+            } else if (c == '\'') {
+                ctx_quote[ctx_depth] = SHELL_SQUOTE;
+            } else if (c == '"') {
+                ctx_quote[ctx_depth] = SHELL_DQUOTE;
+            } else if (c == ')' && ctx_opener[ctx_depth] == '(') {
+                --ctx_depth;
+            }
         }
 
         if (pos == pattern_len)
@@ -445,7 +550,7 @@ Octstr *urltrans_fill_escape_codes_ex(Octstr *pattern, Msg *request, int escape_
             /* Same reasoning as %S: never reaches a shell unquoted. */
             enc = octstr_duplicate(request->sms.charset);
             if (escape_type == URLTRANS_ESCAPE_SHELL)
-                octstr_shell_escape(enc);
+                shell_escape_in_context(enc, ctx_quote[ctx_depth]);
             octstr_append(result, enc);
             octstr_destroy(enc);
         } else {
@@ -673,7 +778,7 @@ Octstr *urltrans_fill_escape_codes_ex(Octstr *pattern, Msg *request, int escape_
          * or a semicolon straight into popen(). URL behaviour is unchanged.
          */
         if (escape_type == URLTRANS_ESCAPE_SHELL)
-            octstr_shell_escape(enc);
+            shell_escape_in_context(enc, ctx_quote[ctx_depth]);
         octstr_append(result, enc);
         octstr_destroy(enc);
         ++nextarg;
@@ -832,8 +937,12 @@ Octstr *urltrans_get_pattern(URLTranslation *t, Msg *request)
     /* We have pulled this out into an own exported function. This
      * gives other modules the chance to use the same escape code
      * semantics for Msgs.
-     * Use shell escaping for EXECUTE type to prevent command injection. */
-    if (t && t->type == TRANSTYPE_EXECUTE)
+     * Use shell escaping for EXECUTE type to prevent command injection.
+     * A delivery report is the exception: the pattern above is then a URL
+     * and smsbox services it as TRANSTYPE_GET_URL whatever the service is
+     * configured as, so shell quoting would leave '&' and spaces unencoded
+     * in the callback URL instead of protecting anything. */
+    if (t && t->type == TRANSTYPE_EXECUTE && request->sms.sms_type != report_mo)
         result = urltrans_fill_escape_codes_ex(pattern, request, URLTRANS_ESCAPE_SHELL);
     else
         result = urltrans_fill_escape_codes(pattern, request);
@@ -1052,6 +1161,32 @@ int urltrans_max_priority(URLTranslation *t)
 
 
 /*
+ * Substituted values are escaped for one round of shell parsing. A pattern
+ * that hands its command line to another shell -- "sh -c ...", "eval ..." --
+ * gets a second round, which strips that escaping again and puts the message
+ * body back in front of a parser. No escaping can survive that, so say so
+ * rather than let it look safe.
+ */
+static void warn_on_reparsed_exec(Octstr *pattern)
+{
+    static const char *reparsers[] = { "eval ", "sh -c", "bash -c", "ksh -c",
+                                       "zsh -c", "dash -c", NULL };
+    int i;
+
+    for (i = 0; reparsers[i] != NULL; ++i) {
+        if (octstr_search(pattern, octstr_imm(reparsers[i]), 0) >= 0) {
+            warning(0, "sms-service 'exec' pattern runs its command line "
+                       "through '%s', which parses it a second time: escape "
+                       "codes there are NOT protected against a hostile "
+                       "message. Pattern: <%s>",
+                    reparsers[i], octstr_get_cstr(pattern));
+            return;
+        }
+    }
+}
+
+
+/*
  * Create one URLTranslation. Return NULL for failure, pointer to it for OK.
  */
 static URLTranslation *create_onetrans(CfgGroup *grp)
@@ -1126,6 +1261,7 @@ static URLTranslation *create_onetrans(CfgGroup *grp)
 	} else if (exec != NULL) {
 	    ot->type = TRANSTYPE_EXECUTE;
 	    ot->pattern = octstr_duplicate(exec);
+	    warn_on_reparsed_exec(exec);
 	} else {
 	    octstr_destroy(url);
 	    octstr_destroy(post_url);

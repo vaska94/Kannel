@@ -12,7 +12,8 @@ noinst_PROGRAMS = \
 	check_list \
 	check_octstr \
 	check_sockaddr \
-	check_url
+	check_url \
+	check_urltrans
 
 dist_noinst_SCRIPTS = \
 	check_fakesmsc.sh \
