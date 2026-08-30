@@ -2,6 +2,85 @@
 
 All notable changes to Kamex (formerly Kannel) will be documented in this file.
 
+## [1.9.7] - 2026-08-30
+
+### Security
+- **SQL injection in SQLBox on MySQL under a multibyte connection character
+  set.** The 1.9.6 fix stopped backslash-escaping the quote but kept doubling
+  backslashes by hand, and doubling is not character-set aware. In GBK, Big5,
+  SJIS/CP932 and UHC a byte of `0x5C` can be the *trailing* byte of a
+  character, so the server pairs the first backslash with the byte before it
+  and the second one is left over to escape the closing quote — the rest of an
+  SMS body then leaves the literal and is parsed as SQL. Confirmed against
+  MariaDB with `character_set_server=gbk`: a sender field of `0xBF 0x5C` broke
+  out of its literal and let a following field set another column's value, in a
+  single statement, using no quote characters at all. UTF-8 and other
+  single-byte connections were never affected.
+
+  Values are now escaped with `mysql_real_escape_string()`, which reads the
+  character set off the connection and steps over multibyte sequences properly.
+  That means escaping has to happen against the same connection the statement
+  runs on, so `mysql_save_msg()` and `mysql_save_list()` now take one pooled
+  connection and use it for both. Statements are sent with
+  `mysql_real_query()`, since under `NO_BACKSLASH_ESCAPES` a NUL byte survives
+  escaping and would truncate a `strlen()`-measured statement mid-literal.
+  Where the client library provides `mysql_real_escape_string_quote()`
+  (libmysqlclient 5.7.6+, which otherwise refuses to escape at all in that
+  mode) it is used instead; the choice is made by `configure`, not by version
+  macros, because MariaDB Connector/C handles the mode inside the plain call
+  and ships no `_quote`.
+
+- **SQL injection in SQLBox on PostgreSQL with `standard_conforming_strings`
+  off.** Noted as a residual in 1.9.6 and now fixed rather than documented.
+  That setting is an ordinary GUC — still set per database, per role or in
+  `postgresql.conf` by deployments carrying old application code — and with it
+  off a backslash escapes again, so a value ending in one swallowed the closing
+  quote. `PQexec` accepts several statements separated by semicolons, so this
+  was arbitrary SQL. Values now go through `PQescapeLiteral()`, which consults
+  both `standard_conforming_strings` and `client_encoding` and returns the
+  literal already quoted. `pgsql_save_msg()` holds one connection for escaping
+  and the statement, as on MySQL. SQLite and SQL Server were re-checked and
+  need no change: neither has a backslash escape or a mode that introduces one,
+  and `0x27` is not a valid trailing byte in any character set either supports.
+
+- **Command injection in an `exec` sms-service whose pattern quotes the escape
+  code.** 1.9.5 escaped substituted values by wrapping them in single quotes,
+  which protects them only in bare text. Written as `exec = "/path/handler
+  \"%S\""` — quoting the code is a natural thing to write — the added quotes
+  land inside the operator's double quotes as ordinary characters, and `$(...)`,
+  backticks and `${...}` in the message body still expand. Verified by running
+  the generated command: an inbound `$(id)` executed.
+
+  Substitution now tracks the quoting of the pattern itself and escapes each
+  value for the context it lands in: wrapped in single quotes in bare text,
+  `'\''` inside `'...'`, and backslash-escaped `$`, backtick, `"` and `\`
+  inside `"..."`. `$(...)` and backticks start a fresh command context and are
+  followed as such. This also fixes patterns that already single-quoted the
+  code, where a message containing an apostrophe previously produced an
+  unbalanced command line that the shell rejected outright.
+
+  One case escaping cannot cover: a pattern that hands its command line to
+  another shell (`sh -c ...`, `eval ...`) gets a second round of parsing, which
+  strips the escaping again. Configuration is now scanned for that shape at
+  start-up and warns, naming the pattern.
+
+### Fixed
+- **Delivery-report URLs were shell-quoted for `exec` sms-services.** A service
+  configured with both `exec` and `dlr-url` picked its escaping from the
+  service type while smsbox services every delivery report as
+  `TRANSTYPE_GET_URL`, so values went into the callback URL wrapped in single
+  quotes and with `&`, `=` and spaces left unencoded — letting a message body
+  add parameters to the DLR callback. Delivery reports now always use URL
+  encoding, whatever the service type. Found while verifying the 1.9.5 fix.
+- SQLBox on PostgreSQL leaked every `PGresult` from an update statement.
+- `mysql_update()` consulted `mysql_errno()` after every statement, including
+  successful ones, because of a missing pair of braces.
+
+### Added
+- `checks/check_urltrans` covers escape-code substitution for both command
+  lines and URLs. Neither the 1.9.5 nor the 1.9.6 fix shipped a regression
+  test, which is how the two above went unnoticed.
+
 ## [1.9.6] - 2026-08-30
 
 ### Security
