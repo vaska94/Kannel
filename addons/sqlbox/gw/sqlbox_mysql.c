@@ -244,8 +244,15 @@ static Octstr *get_string_value_or_return_null(Octstr *str)
         return octstr_create("NULL");
     }
     /* todo: create a new string instead of inline replacing */
+    /*
+     * MySQL treats a backslash as an escape character inside string literals
+     * unless NO_BACKSLASH_ESCAPES is set, so backslashes still need doubling
+     * here. The quote is doubled rather than backslash-escaped: '' is the SQL
+     * standard form and MySQL accepts it either way, so the same convention
+     * holds across every backend.
+     */
     octstr_replace(str, octstr_imm("\\"), octstr_imm("\\\\"));
-    octstr_replace(str, octstr_imm("\'"), octstr_imm("\\\'"));
+    octstr_replace(str, octstr_imm("\'"), octstr_imm("\'\'"));
     return octstr_format("\'%S\'", str);
 }
 

@@ -2,6 +2,31 @@
 
 All notable changes to Kamex (formerly Kannel) will be documented in this file.
 
+## [Unreleased]
+
+### Security
+- **SQL injection in SQLBox on PostgreSQL, SQLite and SQL Server.** The value
+  quoting used MySQL's convention on every backend — escaping a single quote as
+  `\'`. A backslash is not an escape character inside a string literal on
+  PostgreSQL with `standard_conforming_strings` on (the default since 9.1), nor
+  on SQLite or SQL Server, so the quote stayed live and closed the literal:
+  the remainder of an SMS body was parsed as SQL. The PostgreSQL driver issues
+  statements through `PQexec`, which accepts several statements separated by
+  semicolons, so this was arbitrary SQL rather than a malformed insert.
+
+  Values are now quoted the SQL-standard way, by doubling the quote. Backslashes
+  are left untouched on those three backends, where doubling them would have
+  corrupted stored text; MySQL keeps backslash doubling, since it does treat a
+  backslash as an escape unless `NO_BACKSLASH_ESCAPES` is set. Oracle was never
+  affected — it passes values as bind variables.
+
+  Residual note: on PostgreSQL with `standard_conforming_strings` explicitly
+  turned *off* — a deprecated, non-default setting — a value ending in a
+  backslash can still escape the closing quote. Use the default.
+
+  Found by **Nika Archvadze** in the same audit as the `exec` command injection
+  fixed in 1.9.5.
+
 ## [1.9.5] - 2026-08-29
 
 ### Security
