@@ -2,7 +2,7 @@
 
 All notable changes to Kamex (formerly Kannel) will be documented in this file.
 
-## [Unreleased]
+## [1.9.5] - 2026-08-29
 
 ### Security
 - **Remote code execution via `%S` (and `%C`) in an `exec` sms-service.**
