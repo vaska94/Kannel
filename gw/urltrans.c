@@ -442,7 +442,12 @@ Octstr *urltrans_fill_escape_codes_ex(Octstr *pattern, Msg *request, int escape_
 
     case 'C':
         if (octstr_len(request->sms.charset)) {
-            octstr_append(result, request->sms.charset);
+            /* Same reasoning as %S: never reaches a shell unquoted. */
+            enc = octstr_duplicate(request->sms.charset);
+            if (escape_type == URLTRANS_ESCAPE_SHELL)
+                octstr_shell_escape(enc);
+            octstr_append(result, enc);
+            octstr_destroy(enc);
         } else {
             switch (request->sms.coding) {
             case DC_UNDEF:
@@ -653,12 +658,24 @@ Octstr *urltrans_fill_escape_codes_ex(Octstr *pattern, Msg *request, int escape_
         if (nextarg >= num_words)
         	break;
         temp = gwlist_get(word_list, nextarg);
+        enc = octstr_create("");
         for (i = 0; i < octstr_len(temp); ++i) {
         	if (octstr_get_char(temp, i) == '*')
-        		octstr_append_char(result, '~');
+        		octstr_append_char(enc, '~');
         	else
-        		octstr_append_char(result, octstr_get_char(temp, i));
+        		octstr_append_char(enc, octstr_get_char(temp, i));
         }
+        /*
+         * %S is deliberately not URL-encoded -- that is the whole difference
+         * between it and %s -- but "not URL-encoded" must not extend to being
+         * handed to a shell unquoted. This word comes from the message body,
+         * so for TRANSTYPE_EXECUTE it would otherwise carry $(...), backticks
+         * or a semicolon straight into popen(). URL behaviour is unchanged.
+         */
+        if (escape_type == URLTRANS_ESCAPE_SHELL)
+            octstr_shell_escape(enc);
+        octstr_append(result, enc);
+        octstr_destroy(enc);
         ++nextarg;
         break;
 

@@ -2,6 +2,30 @@
 
 All notable changes to Kamex (formerly Kannel) will be documented in this file.
 
+## [Unreleased]
+
+### Security
+- **Remote code execution via `%S` (and `%C`) in an `exec` sms-service.**
+  `urltrans_fill_escape_codes_ex()` escaped substituted values for
+  `TRANSTYPE_EXECUTE`, but `%S` and `%C` appended their value to the command
+  line without going through the escape. `%S` is a word taken straight from the
+  inbound message body, and the finished string is handed to `popen()`, so for
+  any deployment whose `exec` pattern uses `%S` an inbound SMS containing
+  `$(...)`, backticks or a semicolon executed arbitrary commands as the smsbox
+  user.
+
+  Both now shell-escape when the result is a command line. URL substitution is
+  unchanged: `%S` stays deliberately un-encoded there — that is its whole
+  difference from `%s` — and still maps `*` to `~`.
+
+  Verified by executing the generated command: `$(id)`, backticks, `;id;` and
+  an embedded-single-quote payload are all passed through literally and none
+  execute. Deployments not using `exec` sms-services, or not using `%S`/`%C` in
+  one, were never exposed.
+
+  Found and reported with a working proof of concept by **Nika Archvadze** —
+  thank you.
+
 ## [1.9.4] - 2026-08-29
 
 ### Fixed
