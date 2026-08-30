@@ -2,7 +2,7 @@
 
 All notable changes to Kamex (formerly Kannel) will be documented in this file.
 
-## [Unreleased]
+## [1.9.6] - 2026-08-30
 
 ### Security
 - **SQL injection in SQLBox on PostgreSQL, SQLite and SQL Server.** The value
