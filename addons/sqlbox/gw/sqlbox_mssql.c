@@ -82,8 +82,15 @@ static Octstr *get_string_value_or_return_null(Octstr *str)
     } else if (octstr_compare(str, octstr_imm("")) == 0) {
         return octstr_create("NULL");
     }
-    octstr_replace(str, octstr_imm("\\"), octstr_imm("\\\\"));
-    octstr_replace(str, octstr_imm("\'"), octstr_imm("\\\'"));
+    /*
+     * Double the quote, which is how the SQL standard escapes it. The previous
+     * backslash form is MySQL's: on PostgreSQL with standard_conforming_strings
+     * on -- the default since 9.1 -- and on SQLite and SQL Server, a backslash
+     * is an ordinary character, so \' left the quote free to close the literal
+     * and the rest of an SMS body became SQL. Backslashes are left alone here;
+     * doubling them would corrupt the stored text.
+     */
+    octstr_replace(str, octstr_imm("\'"), octstr_imm("\'\'"));
     return octstr_format("\'%S\'", str);
 }
 
