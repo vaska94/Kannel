@@ -23,21 +23,20 @@ static DBPool *pool = NULL;
  *-------------------------------------------------
 */
 
-static void pgsql_update(const Octstr *sql)
+/*
+ * Run a statement on a connection the caller already holds. Values have to be
+ * escaped against the same connection they are sent on -- see
+ * get_string_value_or_return_null() -- and the pool defaults to a single
+ * connection, so a caller that has one must not go back for another.
+ */
+static void pgsql_update_conn(DBPoolConn *pc, const Octstr *sql)
 {
-    DBPoolConn *pc;
     PGresult *res;
     ExecStatusType status;
 
 #if defined(SQLBOX_TRACE)
      debug("SQLBOX", 0, "sql: %s", octstr_get_cstr(sql));
 #endif
-
-    pc = dbpool_conn_consume(pool);
-    if (pc == NULL) {
-        error(0, "PGSQL: Database pool got no connection! DB update failed!");
-        return;
-    }
 
     res = PQexec(pc->conn, octstr_get_cstr(sql));
     status = PQresultStatus(res);
@@ -51,6 +50,20 @@ static void pgsql_update(const Octstr *sql)
         /* Don't handle the other PGRES_foobar enumerates. */
         break;
     }
+    PQclear(res);
+}
+
+static void pgsql_update(const Octstr *sql)
+{
+    DBPoolConn *pc;
+
+    pc = dbpool_conn_consume(pool);
+    if (pc == NULL) {
+        error(0, "PGSQL: Database pool got no connection! DB update failed!");
+        return;
+    }
+
+    pgsql_update_conn(pc, sql);
 
     dbpool_conn_produce(pc);
 }
@@ -121,34 +134,60 @@ static Octstr *get_numeric_value_or_return_null(long int num)
     return octstr_format("%ld", num);
 }
 
-static Octstr *get_string_value_or_return_null(Octstr *str)
+/*
+ * Quote a value for PostgreSQL, using the connection it will be sent on.
+ *
+ * Doubling the quote by hand is right only while standard_conforming_strings
+ * is on. That is the default, but it is an ordinary GUC and legacy setups
+ * still turn it off per database, per role or in postgresql.conf; with it off
+ * a backslash escapes again, so a value ending in one swallows the closing
+ * quote and lets the rest of an SMS body out into the statement -- and PQexec
+ * takes several statements separated by semicolons. PQescapeLiteral() reads
+ * both standard_conforming_strings and client_encoding off the connection and
+ * returns the literal already quoted, switching to E'...' when it has to.
+ */
+static Octstr *get_string_value_or_return_null(PGconn *conn, const Octstr *str)
 {
+    char *escaped;
+    Octstr *ret;
+
     if (str == NULL) {
         return octstr_create("NULL");
     }
     if (octstr_compare(str, octstr_imm("")) == 0) {
         return octstr_create("NULL");
     }
-    /*
-     * Double the quote, which is how the SQL standard escapes it. The previous
-     * backslash form is MySQL's: on PostgreSQL with standard_conforming_strings
-     * on -- the default since 9.1 -- and on SQLite and SQL Server, a backslash
-     * is an ordinary character, so \' left the quote free to close the literal
-     * and the rest of an SMS body became SQL. Backslashes are left alone here;
-     * doubling them would corrupt the stored text.
-     */
-    octstr_replace(str, octstr_imm("\'"), octstr_imm("\'\'"));
-    return octstr_format("\'%S\'", str);
+
+    escaped = PQescapeLiteral(conn, octstr_get_cstr(str),
+                              (size_t) octstr_len(str));
+    if (escaped == NULL) {
+        /* Store NULL and say so rather than emit a statement that cannot be
+         * shown to be safe. */
+        error(0, "PGSQL: cannot escape value: %s", PQerrorMessage(conn));
+        return octstr_create("NULL");
+    }
+
+    ret = octstr_create(escaped);
+    PQfreemem(escaped);
+    return ret;
 }
 
 #define st_num(x) (stuffer[stuffcount++] = get_numeric_value_or_return_null(x))
-#define st_str(x) (stuffer[stuffcount++] = get_string_value_or_return_null(x))
+#define st_str(x) (stuffer[stuffcount++] = get_string_value_or_return_null(pc->conn, x))
 
 void pgsql_save_msg(Msg *msg, Octstr *momt /*, Octstr smsbox_id */)
 {
     Octstr *sql;
     Octstr *stuffer[30];
     int stuffcount = 0;
+    DBPoolConn *pc;
+
+    /* One connection for both the escaping and the statement it ends up in. */
+    pc = dbpool_conn_consume(pool);
+    if (pc == NULL) {
+        error(0, "PGSQL: Database pool got no connection! DB update failed!");
+        return;
+    }
 
     sql = octstr_format(SQLBOX_PGSQL_INSERT_QUERY, sqlbox_logtable, st_str(momt), st_str(msg->sms.sender),
         st_str(msg->sms.receiver), st_str(msg->sms.udhdata), st_str(msg->sms.msgdata), st_num(msg->sms.time),
@@ -157,7 +196,8 @@ void pgsql_save_msg(Msg *msg, Octstr *momt /*, Octstr smsbox_id */)
         st_num(msg->sms.validity), st_num(msg->sms.deferred), st_num(msg->sms.dlr_mask), st_str(msg->sms.dlr_url),
         st_num(msg->sms.pid), st_num(msg->sms.alt_dcs), st_num(msg->sms.rpi), st_str(msg->sms.charset),
         st_str(msg->sms.boxc_id), st_str(msg->sms.binfo), st_str(msg->sms.meta_data), st_str(msg->sms.foreign_id));
-    sql_update(sql);
+    pgsql_update_conn(pc, sql);
+    dbpool_conn_produce(pc);
         //debug("sqlbox", 0, "sql_save_msg: %s", octstr_get_cstr(sql));
     while (stuffcount > 0) {
         octstr_destroy(stuffer[--stuffcount]);

@@ -766,6 +766,11 @@ else
     fi
     AC_CHECK_HEADERS(mysql/mysql.h mysql/mysql_version.h)
     AC_CHECK_LIB(mysqlclient, mysql_stmt_init, [], [AC_MSG_ERROR([Unable to find MySQL/MariaDB client library])])
+    dnl libmysqlclient 5.7.6+ refuses mysql_real_escape_string() when the server
+    dnl has NO_BACKSLASH_ESCAPES set and wants the _quote form instead. MariaDB
+    dnl Connector/C handles that mode inside the plain call and ships no _quote,
+    dnl so detect the symbol rather than sniffing version macros.
+    AC_CHECK_FUNCS([mysql_real_escape_string_quote])
     AC_DEFINE(HAVE_MYSQL, 1, [Do we have mysql])
     AC_MSG_CHECKING([whether to compile with MySQL support])
     AC_MSG_RESULT(yes)

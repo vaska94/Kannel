@@ -17,14 +17,35 @@ static Octstr *sqlbox_insert_table;
 
 static DBPool *pool = NULL;
 
-static void mysql_update(const Octstr *sql)
+/*
+ * Run a statement on a connection the caller already holds. Values have to be
+ * escaped against the same connection they are sent on -- see
+ * get_string_value_or_return_null() -- so the callers that build a statement
+ * from message data take the connection first and use this, rather than
+ * mysql_update() below, which would consume a second one.
+ */
+static void mysql_update_conn(DBPoolConn *pc, const Octstr *sql)
 {
-    int state;
-    DBPoolConn *pc;
-
 #if defined(SQLBOX_TRACE)
      debug("SQLBOX", 0, "sql: %s", octstr_get_cstr(sql));
 #endif
+
+    /*
+     * mysql_real_query() rather than mysql_query(): under NO_BACKSLASH_ESCAPES
+     * only the quote is doubled and a NUL byte in the data survives escaping,
+     * which would truncate a strlen()-measured statement mid-literal.
+     */
+    if (mysql_real_query(pc->conn, octstr_get_cstr(sql), octstr_len(sql)) != 0) {
+        error(0, "MYSQL: %s", mysql_error(pc->conn));
+        if (mysql_errno(pc->conn) == MYSQL_ERR_NOSUCHFIELD) {
+            error(0, "Try to recreate insert and log tables. The structure may have changed. See ChangeLog.");
+        }
+    }
+}
+
+static void mysql_update(const Octstr *sql)
+{
+    DBPoolConn *pc;
 
     pc = dbpool_conn_consume(pool);
     if (pc == NULL) {
@@ -32,12 +53,7 @@ static void mysql_update(const Octstr *sql)
         return;
     }
 
-    state = mysql_query(pc->conn, octstr_get_cstr(sql));
-    if (state != 0)
-        error(0, "MYSQL: %s", mysql_error(pc->conn));
-        if (mysql_errno(pc->conn) == MYSQL_ERR_NOSUCHFIELD) {
-            error(0, "Try to recreate insert and log tables. The structure may have changed. See ChangeLog.");
-        }
+    mysql_update_conn(pc, sql);
 
     dbpool_conn_produce(pc);
 }
@@ -235,35 +251,83 @@ static Octstr *get_numeric_value_or_return_null(long int num)
     return octstr_format("%ld", num);
 }
 
-static Octstr *get_string_value_or_return_null(Octstr *str)
+/*
+ * Quote a value for MySQL, using the connection it will be sent on.
+ *
+ * Escaping by hand is not safe here. Doubling backslashes assumes a byte of
+ * 0x5C is always a backslash, but in the multibyte character sets where it can
+ * also be the trailing byte of a character -- GBK, Big5, SJIS, CP932 -- the
+ * server pairs it with the byte before instead, and the second backslash of a
+ * hand-doubled pair is then left to escape the closing quote and let the rest
+ * of an SMS body out into the statement. mysql_real_escape_string() reads the
+ * character set off the connection and steps over multibyte sequences
+ * correctly, and it also honours NO_BACKSLASH_ESCAPES on its own, so it is
+ * right in both directions.
+ */
+static Octstr *get_string_value_or_return_null(MYSQL *conn, const Octstr *str)
 {
+    char *escaped;
+    unsigned long len, esclen;
+    Octstr *ret;
+
     if (str == NULL) {
         return octstr_create("NULL");
     }
     if (octstr_compare(str, octstr_imm("")) == 0) {
         return octstr_create("NULL");
     }
-    /* todo: create a new string instead of inline replacing */
-    /*
-     * MySQL treats a backslash as an escape character inside string literals
-     * unless NO_BACKSLASH_ESCAPES is set, so backslashes still need doubling
-     * here. The quote is doubled rather than backslash-escaped: '' is the SQL
-     * standard form and MySQL accepts it either way, so the same convention
-     * holds across every backend.
-     */
-    octstr_replace(str, octstr_imm("\\"), octstr_imm("\\\\"));
-    octstr_replace(str, octstr_imm("\'"), octstr_imm("\'\'"));
-    return octstr_format("\'%S\'", str);
+
+    /* octstr_len, never strlen: msgdata and udhdata carry arbitrary bytes,
+     * NUL among them, and strlen would escape only up to the first one. */
+    len = (unsigned long) octstr_len(str);
+
+    /* The library writes at most 2*len bytes plus a terminating NUL. */
+    escaped = gw_malloc(2 * (size_t) len + 1);
+
+#ifdef HAVE_MYSQL_REAL_ESCAPE_STRING_QUOTE
+    esclen = mysql_real_escape_string_quote(conn, escaped,
+                                            octstr_get_cstr(str), len, '\'');
+#else
+    esclen = mysql_real_escape_string(conn, escaped, octstr_get_cstr(str), len);
+#endif
+
+    if (esclen == (unsigned long) -1) {
+        /*
+         * libmysqlclient 5.7.6 and later refuse mysql_real_escape_string()
+         * outright when the server has NO_BACKSLASH_ESCAPES set, and want
+         * mysql_real_escape_string_quote() instead. Never fall back to
+         * escaping by hand: store NULL and say so rather than emit a
+         * statement that cannot be shown to be safe.
+         */
+        error(0, "MYSQL: cannot escape value: %s", mysql_error(conn));
+        gw_free(escaped);
+        return octstr_create("NULL");
+    }
+
+    ret = octstr_create("'");
+    octstr_append_data(ret, escaped, (long) esclen);
+    octstr_append_char(ret, '\'');
+
+    gw_free(escaped);
+    return ret;
 }
 
 #define st_num(x) (stuffer[stuffcount++] = get_numeric_value_or_return_null(x))
-#define st_str(x) (stuffer[stuffcount++] = get_string_value_or_return_null(x))
+#define st_str(x) (stuffer[stuffcount++] = get_string_value_or_return_null(pc->conn, x))
 
 void mysql_save_msg(Msg *msg, Octstr *momt)
 {
     Octstr *sql;
     Octstr *stuffer[30];
     int stuffcount = 0;
+    DBPoolConn *pc;
+
+    /* One connection for both the escaping and the statement it ends up in. */
+    pc = dbpool_conn_consume(pool);
+    if (pc == NULL) {
+        error(0, "MYSQL: Database pool got no connection! DB update failed!");
+        return;
+    }
 
     sql = octstr_format(SQLBOX_MYSQL_INSERT_QUERY, sqlbox_logtable, st_str(momt), st_str(msg->sms.sender),
         st_str(msg->sms.receiver), st_str(msg->sms.udhdata), st_str(msg->sms.msgdata), st_num(msg->sms.time),
@@ -272,7 +336,8 @@ void mysql_save_msg(Msg *msg, Octstr *momt)
         st_num(msg->sms.validity), st_num(msg->sms.deferred), st_num(msg->sms.dlr_mask), st_str(msg->sms.dlr_url),
         st_num(msg->sms.pid), st_num(msg->sms.alt_dcs), st_num(msg->sms.rpi), st_str(msg->sms.charset),
         st_str(msg->sms.boxc_id), st_str(msg->sms.binfo), st_str(msg->sms.meta_data), st_num(msg->sms.priority), st_str(msg->sms.foreign_id));
-    sql_update(sql);
+    mysql_update_conn(pc, sql);
+    dbpool_conn_produce(pc);
     while (stuffcount > 0) {
         octstr_destroy(stuffer[--stuffcount]);
     }
@@ -286,6 +351,15 @@ void mysql_save_list(List *qlist, Octstr *momt, int save_mt)
     Octstr *stuffer[30];
     int stuffcount = 0, first = 1;
     Msg *msg;
+    DBPoolConn *pc;
+
+    /* Held across the whole batch: the values below are escaped against this
+     * connection, so they have to be sent on it too. */
+    pc = dbpool_conn_consume(pool);
+    if (pc == NULL) {
+        error(0, "MYSQL: Database pool got no connection! DB update failed!");
+        return;
+    }
 
     values = save_mt ? octstr_create("") : NULL;
     ids = octstr_create("");
@@ -322,19 +396,22 @@ void mysql_save_list(List *qlist, Octstr *momt, int save_mt)
     if (octstr_len(ids) == 0) {
         octstr_destroy(values);
         octstr_destroy(ids);
+        dbpool_conn_produce(pc);
         return;
     }
 
     if (save_mt) {
         sql = octstr_format(SQLBOX_MYSQL_INSERT_LIST_QUERY, sqlbox_logtable, values);
         octstr_destroy(values);
-        sql_update(sql);
+        mysql_update_conn(pc, sql);
         octstr_destroy(sql);
     }
     sql = octstr_format(SQLBOX_MYSQL_DELETE_LIST_QUERY, sqlbox_insert_table, ids);
     octstr_destroy(ids);
-    sql_update(sql);
+    mysql_update_conn(pc, sql);
     octstr_destroy(sql);
+
+    dbpool_conn_produce(pc);
 }
 
 void mysql_leave()
